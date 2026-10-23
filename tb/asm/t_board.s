@@ -18,6 +18,8 @@
 ;         of the frame (its MOVEs to INTREQ seen by the CPU), the blitter
 ;         (a copy, an inverting blit with an A modulo)
 ;  110-119 the RESET instruction: Paula and CIA-A reset, the overlay back
+;  120-129 the HPS share window ($DD4000): Minimig's byte layout, which Main
+;         reads (the bench checks the DDR3 bytes and replies at mark 3)
 
 	include	"hw.i"
 
@@ -368,6 +370,21 @@ after_berr:
 	move.b	#2,CIAA_PRA             ; OVL off
 	move.l	$0.w,d0                 ; chip RAM back, its contents kept
 	TCHECK	d0,$12345678,112
+
+;--- the HPS share window: Minimig's layout, as Main's minimig_share.cpp reads it --
+	clr.l	$DD4004
+	move.l	#$AABBCCDD,$DD4000
+	move.l	$DD4000,d0              ; (the read follows the posted write)
+	TCHECK	d0,$AABBCCDD,120
+	TMARK	3                       ; the bench checks the bytes as the ARM sees them
+	move.l	$DD4004,d0              ; and replies as Main does: uint16 0x1234, 0x5678
+	TCHECK	d0,$12345678,121
+	moveq	#0,d0
+	move.w	$DD4006,d0
+	TCHECK	d0,$5678,122
+	moveq	#0,d0
+	move.b	$DD4005,d0
+	TCHECK	d0,$34,123
 
 	TPRINT	msg_pass
 	TPASS	0

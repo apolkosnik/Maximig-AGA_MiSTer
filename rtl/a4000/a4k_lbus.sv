@@ -382,6 +382,18 @@ wire beat_new = (lb_req != lb_ack) && st == S_IDLE;
 wire       sd_busy = (sd_req != sd_ack);
 wire       dd_busy = (dd_req != dd_ack);
 reg        sd_pf;           // the outstanding SDRAM request is the line's prefetch
+reg        dd_sh;           // the outstanding DDR3 request is the share window's
+
+// The HPS share window keeps Minimig's layout, which minimig_share.cpp
+// reads: the two bytes of each 16-bit word swapped against the Amiga order
+// the rest of DDR3 holds (Minimig's ddram_ctrl, ramshared).  Data and byte
+// enables both; the window is cache-inhibited, so only single beats.
+function automatic [31:0] sh_swap(input [31:0] w);
+	sh_swap = {w[23:16], w[31:24], w[7:0], w[15:8]};
+endfunction
+function automatic [3:0] sh_swap_be(input [3:0] b);
+	sh_swap_be = {b[2], b[3], b[0], b[1]};
+endfunction
 
 function automatic [31:0] q_long(input [63:0] q, input a2);
 	q_long = a2 ? q[31:0] : q[63:32];
@@ -441,6 +453,7 @@ always @(posedge clk) begin
 		sdb_v          <= 1'b0;
 		ddb_v          <= 1'b0;
 		sd_pf          <= 1'b0;
+		dd_sh          <= 1'b0;
 		rtg_cs         <= 1'b0;
 		rtg_rd         <= 1'b0;
 		rtg_wr         <= 1'b0;
@@ -605,8 +618,9 @@ always @(posedge clk) begin
 		S_DDQ: if (!dd_busy) begin
 			dd_addr  <= dd_byte;
 			dd_we    <= lb_we;
-			dd_be    <= lb_be;
-			dd_wdata <= lb_wdata;
+			dd_be    <= (dec == T_SHARE) ? sh_swap_be(lb_be) : lb_be;
+			dd_wdata <= (dec == T_SHARE) ? sh_swap(lb_wdata) : lb_wdata;
+			dd_sh    <= (dec == T_SHARE);
 			dd_req   <= ~dd_req;
 			if (lb_we) begin
 				if (ddb_v && ddb_a == dd_byte[28:4]) ddb_v <= 1'b0;
@@ -616,8 +630,8 @@ always @(posedge clk) begin
 		end
 
 		S_DDR: if (!dd_busy) begin
-			rdata <= l_long(dd_rdata, dd_addr[3:2]);
-			if (lb_line) begin
+			rdata <= dd_sh ? sh_swap(l_long(dd_rdata, dd_addr[3:2])) : l_long(dd_rdata, dd_addr[3:2]);
+			if (lb_line && !dd_sh) begin
 				ddb_v <= 1'b1;
 				ddb_a <= dd_addr[28:4];
 				ddb_d <= dd_rdata;
