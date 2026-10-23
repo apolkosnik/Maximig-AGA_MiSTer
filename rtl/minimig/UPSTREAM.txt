@@ -1,0 +1,11 @@
+4767064f229a8ea856e643027aed7246263bb118 2026-10-22 Revert "Fix RTG with the 68030 MMU enabled (#281)" (#284)
+
+Local changes beyond the A4000 trimming: registers that were assigned with
+blocking '=' in clocked blocks and read by other blocks now use '<=' (the
+same flip-flops in synthesis; in a simulator the blocking form races, and
+Verilator lost the copper's pointer reload to it):
+  agnus_copper.v      copjmp1, copjmp2, strobe1, strobe2, strobe
+  paula_floppy_fifo.v out
+  MiSTerFloppyFifo.v  out
+  paula_floppy.v      virtualFloppyFifoReset
+  userio.v            joy1enable, floppy_ext_drive, user_port_mode

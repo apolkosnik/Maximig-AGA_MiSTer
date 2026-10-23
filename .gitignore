@@ -1,0 +1,36 @@
+# Quartus
+db/
+incremental_db/
+output_files/
+greybox_tmp/
+*.qws
+*.rpt
+*.summary
+*.smsg
+*.done
+*.jdi
+*.sld
+*.pin
+*.sof
+*.pof
+*.qdf
+*.bak
+c5_pin_model_dump.txt
+build_id.v
+jtag.cdf
+PLLJ_PLLSPE_INFO.txt
+*.pid
+build_*.log
+# simulation
+tb/**/obj_dir/
+tb/**/obj_trace/
+tb/**/obj_*/
+tb/**/*.log
+tb/**/frames*/
+tb/**/build/
+*.fst
+*.vcd
+__pycache__/
+main_patch/build/
+# build logs
+logs/

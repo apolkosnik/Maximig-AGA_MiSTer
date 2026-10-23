@@ -1,0 +1,22 @@
+# The Minimig chipset sources this core uses (rtl/minimig/UPSTREAM.txt)
+set M $::quartus(qip_path)
+foreach f {agnus.v agnus_spritedma.v agnus_refresh.v agnus_diskdma.v agnus_copper.v agnus_blitter.v
+           agnus_blitter_minterm.v agnus_blitter_fill.v agnus_blitter_barrelshifter.v agnus_blitter_adrgen.v
+           agnus_bitplanedma.v agnus_beamcounter.v agnus_audiodma.v
+           denise.v denise_sprites.v denise_sprites_shifter.v denise_spritepriority.v denise_playfields.v
+           denise_hamgenerator.v denise_colortable.v denise_colortable_ram_mf.v denise_collision.v
+           denise_bitplanes.v denise_bitplane_shifter.v
+           paula.v paula_uart.v paula_intcontroller.v paula_floppy.v paula_floppy_fifo.v paula_audio.v
+           paula_audio_volume.v paula_audio_mixer.v paula_audio_channel.v
+           ciaa.v ciab.v cia_timerd.v cia_timerb.v cia_timera.v cia_int.v
+           MiSTerFloppyi2c.v MiSTerFloppyPLL.v MiSTerFloppyRAWIO.v MiSTerFloppySHUGART.v
+           MiSTerFloppyFifo.v MiSTerFloppyVirtualFluxDrive.v
+           amiga_clk.v userio.v minimig_syscontrol.v minimig_m68k_bridge.v ide.v rtg.v drive_sounds.v hps_ext.v} {
+	set_global_assignment -name VERILOG_FILE [file join $M $f]
+}
+foreach f {a2065.v a2065_ddr3_mailbox.v a2065_ddram.v a2065_ddram_arbiter.v a2065_regfile.v} {
+	set_global_assignment -name VERILOG_FILE [file join $M "A2065" $f]
+}
+foreach f {toccata_capture.sv toccata_playback.sv toccata_volume.sv toccata_fifo.sv toccata.sv} {
+	set_global_assignment -name SYSTEMVERILOG_FILE [file join $M "fpga-toccata" $f]
+}

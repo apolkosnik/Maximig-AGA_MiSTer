@@ -1,0 +1,25 @@
+# AP68040 (the rtl/AP68040 submodule, branch faster): its Quartus file list
+# in dependency order.  The generated rtl/gen/*.svh tables are `included,
+# not compiled, hence the search paths.
+set A [file join $::quartus(qip_path) ".." "AP68040" "rtl"]
+set_global_assignment -name SEARCH_PATH $A
+set_global_assignment -name SEARCH_PATH [file join $A "gen"]
+set_global_assignment -name SEARCH_PATH [file join $A "fpu"]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $A "ap68040_pkg.sv"]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $A "gen" "ap68040_upkg.sv"]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $A "ap68040_alu.sv"]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $A "ap68040_alu_slow.sv"]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $A "ap68040_muldiv.sv"]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $A "ap68040_biu.sv"]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $A "ap68040_ram.sv"]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $A "ap68040_atc.sv"]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $A "ap68040_dmu.sv"]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $A "ap68040_predec.sv"]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $A "ap68040_fetch.sv"]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $A "ap68040_decode.sv"]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $A "ap68040_useq.sv"]
+set_global_assignment -name VERILOG_FILE       [file join $A "fpu" "ap040_fpu.v"]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $A "ap68040_fpif.sv"]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $A "ap68040_backend.sv"]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $A "ap68040_snoop.sv"]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $A "ap68040.sv"]
