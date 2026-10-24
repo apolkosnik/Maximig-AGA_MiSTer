@@ -398,6 +398,19 @@ after_berr:
 	clr.l	$1F04.w
 	clr.l	$1F08.w
 	move.w	#$0ABC,$180(a1)         ; COLOR00, for the custom register mirror
+	; Keep the chip bus busy while the cartridge is fetched.  A running
+	; display does not stop DMA just because F11 raises level 7.
+	move.l	#$01820000,COPL1        ; COLOR01 = 0
+	move.l	#$00880000,COPL1+4      ; COPJMP1: repeat without a WAIT
+	move.l	#COPL1,$80(a1)
+	move.w	#$8280,$96(a1)          ; DMAEN | COPEN
+	move.w	d0,$88(a1)
+	move.w	#$0100,$40(a1)          ; D-only blit, fill with zero
+	clr.w	$42(a1)
+	clr.w	$66(a1)
+	move.l	#$80000,$54(a1)
+	move.w	#$8040,$96(a1)          ; BLTEN, normal CPU arbitration
+	clr.w	$58(a1)                 ; 1024 rows of 64 words
 	TMARK	4                       ; the bench presses the HRTmon key
 	move.l	#400000,d1
 .nw:	tst.l	$1F04.w
@@ -413,6 +426,7 @@ after_berr:
 	moveq	#0,d0
 	move.w	$1F0A.w,d0              ; and the cartridge RAM
 	TCHECK	d0,$5A5A,133
+	move.w	#$7FFF,$96(a1)
 	moveq	#0,d0
 	movec	d0,vbr
 

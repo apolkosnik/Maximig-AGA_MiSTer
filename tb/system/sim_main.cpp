@@ -20,8 +20,9 @@
 //     --customtrace     print writes to DMACON, COP1LC/2LC, COPJMP, BPLCON0, INTENA,
 //                       INTREQ, COLOR00
 //     --dumpchip MS FILE write the 2 MB of chip RAM to FILE at MS milliseconds
-//     --cart FILE       load FILE at $A10000, the cartridge RAM, where Main
-//                       uploads hrtmon.rom (HRTmon is enabled in the config)
+//     --cart FILE       upload FILE at $A10000 through Main's UIO_MM2_WR
+//                       protocol (HRTmon is enabled in the config)
+//     --freeze-ms N     press F11 after N simulated milliseconds of running
 //     --quiet           no progress lines
 //     --vcd FILE        (TRACE=1 builds) write an FST waveform of
 //     --vcd-from MS     ... the window from MS
@@ -141,7 +142,8 @@ static bool load_rom(const char *path)
 	return true;
 }
 
-// the cartridge RAM: $A00000-$A7FFFF is SDRAM 0x680000 (a4k_chipset)
+// Upload through userio and the halted CPU's chip-bus bridge, as Main's
+// SendFileV2 does.  Direct SDRAM pokes would miss upload/decode failures.
 static bool load_cart(const char *path)
 {
 	FILE *f = fopen(path, "rb");
@@ -149,9 +151,12 @@ static bool load_cart(const char *path)
 	std::vector<uint8_t> b(0x70000);
 	size_t n = fread(b.data(), 1, b.size(), f);
 	fclose(f);
-	sdram_scope();
-	for (uint32_t i = 0; i < n; i += 2)
-		sdram_poke16((0x690000 + i) >> 1, (b[i] << 8) | (i + 1 < n ? b[i + 1] : 0));
+	for (uint32_t i = 0; i < n; i += 512) {
+		uint32_t a = 0xA10000 + i;
+		std::vector<uint8_t> cmd = {0xF0, (uint8_t)a, (uint8_t)(a >> 8), (uint8_t)(a >> 16), 0};
+		for (uint32_t j = 0; j < 512; j++) cmd.push_back(i + j < n ? b[i + j] : 0);
+		uio_cmd(cmd);
+	}
 	return true;
 }
 
@@ -242,7 +247,7 @@ int main(int argc, char **argv)
 	double run_ms = 1000;
 	int speed = 0, mbram = 3, z3 = 0, baud = 9600;
 	bool fast = false, ntsc = false, lbtrace = false, quiet = false, iostat = false, customtrace = false;
-	double lbtrace_from = 0, dump_ms = -1;
+	double lbtrace_from = 0, dump_ms = -1, freeze_ms = -1;
 	const char *dump_file = nullptr, *cart = nullptr;
 	long pctrace = 0;
 	Video video;
@@ -267,6 +272,7 @@ int main(int argc, char **argv)
 		else if (a == "--customtrace") customtrace = true;
 		else if (a == "--dumpchip") { dump_ms = atof(next()); dump_file = next(); }
 		else if (a == "--cart") cart = next();
+		else if (a == "--freeze-ms") freeze_ms = atof(next());
 #if VM_TRACE
 		else if (a == "--vcd") {
 			Verilated::traceEverOn(true);
@@ -289,7 +295,6 @@ int main(int argc, char **argv)
 	top->kbd_mouse_data = 0; top->kbd_mouse_type = 0; top->kbd_mouse_level = 0;
 	idle_sys(64);
 	if (!load_rom(rom)) return 2;
-	if (cart && !load_cart(cart)) return 2;
 	top->reset = 0;
 	idle_sys(64);
 
@@ -301,6 +306,7 @@ int main(int argc, char **argv)
 	uio_cmd({0xF5, (uint8_t)(0x43 | ((mbram & 3) << 2) | ((z3 & 3) << 4) | ((z3 & 4) ? 0x80 : 0))});   // (0x40: HRTmon)
 	uio_cmd({0xF7, 0x00});                                      // floppy: one drive
 	uio_cmd({0xF8, 0x00});                                      // no hard disks
+	if (cart && !load_cart(cart)) return 2;
 	uio_cmd({0xF1, 0x03});                                      // release halt, keep reset
 	idle_sys(1000);
 	uio_cmd({0xF1, 0x00});                                      // run
@@ -312,7 +318,7 @@ int main(int argc, char **argv)
 	int result = -1;
 	bool halted_reported = false;
 	uint64_t beats = 0, retired = 0;
-	uint64_t key_at = 0;            // the HRTmon key: pressed, then released 0.2 ms later
+	uint64_t key_at = freeze_ms < 0 ? 0 : halfstep + (uint64_t)(freeze_ms / 1000.0 * 2.0 * CLK114_HZ);
 	int key_step = 0;
 	bool prev_ce = 0;
 	static const char *rname[] = {"chip","mbram","rom","custom","cia","ide","rtc","gary","acfg","z2io","z3","float","other"};

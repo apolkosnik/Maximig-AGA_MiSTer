@@ -61,7 +61,6 @@ module a4k_lbus
 	input       [1:0] rom_speed,     // ROM jumpers: 5, 6, 7, 8 CPU clocks
 	input             ovl,           // CIA-A OVL: ROM at $000000 for reads
 	input             iack7_t,       // the card: toggles at a level-7 interrupt acknowledge
-	input      [31:0] vbr,           // the CPU's VBR (the NMI vector's address)
 
 	// the card
 	input             lb_req,
@@ -180,11 +179,15 @@ endfunction
 // the HRTmon cartridge (Minimig's cart.v, its CPU side): the level-7
 // interrupt acknowledge (the freeze key's NMI) takes the cartridge out of
 // stealth -- its RAM and custom register mirror at $A00000-$AFFFFF answer
-// on the chip bus from then on -- and arms the NMI vector: the next read of
-// VBR + $7C returns $00A1000C, HRTmon's entry, wherever the VBR points
+// on the chip bus from then on -- and arms the NMI vector: the CPU's next
+// supervisor data read (TT 0, TM 5) is the vector fetch, and it returns
+// $00A1000C, HRTmon's entry.  Not matched by address: the bus carries the
+// physical address, which under the MMU need not be VBR + $7C; between the
+// acknowledge and the vector the 040 only writes its frame (table walks are
+// TM 3/4, instruction fetches TM 6), and AP68040 takes the level-7 vector
+// fetch past its data cache, so it always reaches the bus.
 reg        cart_on = 1'b0;
 reg        nmi_arm = 1'b0;
-wire [31:0] nmi_vec = vbr + 32'h7C;
 
 reg [4:0] dec;
 always @(*) begin
@@ -220,7 +223,7 @@ always @(*) begin
 		if (rtgb_ena && a[31:24] == rtgb_base)
 			dec = !a[23] ? T_RTGFB : (a[22:16] == 7'd0) ? T_RTGREG : T_NONE;
 	end
-	if (nmi_arm && !lb_we && lb_addr == nmi_vec[31:2]) dec = T_NMIV;
+	if (nmi_arm && !lb_we && lb_tt == 2'b00 && lb_tm == 3'd5) dec = T_NMIV;
 end
 
 // cache inhibit (Gary's and the Zorro III boards' CIIN/CINH): everything
