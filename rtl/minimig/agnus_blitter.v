@@ -384,40 +384,24 @@ always @(posedge clk)
   		bltbdat[15:0] <= data_in[15:0];
   end
 		
-reg bltbold_init;
+//channel B 'old' register: the B word before, zero when a blit starts
+//(WinUAE blitter_start_init), so the first word of a blit shifts in zeros
 always @(posedge clk)
   if (clk7_en) begin
-  	if (reset || done)
-  		bltbold_init <= 1'b1;
+  	if (enable && init)
+  		bltbold[15:0] <= 0;
   	else if (reg_address_in[8:1]==BLTBDAT[8:1])
-  		bltbold_init <= 1'b0;
+  		bltbold[15:0] <= data_in[15:0];
   end
 
-//channel B 'old' register
-always @(posedge clk)
-  if (clk7_en) begin
-  	if (reg_address_in[8:1]==BLTBDAT[8:1])
-  		if (bltbold_init)
-  			bltbold[15:0] <= 0;
-  		else
-  			bltbold[15:0] <= bltbdat[15:0];
-  end
-
-reg bltbdat_wrtn;		
-always @(posedge clk)
-  if (clk7_en) begin
-  	if (reg_address_in[8:1]==BLTBDAT[8:1])
-  		bltbdat_wrtn <= 1'b1;
-  	else
-  		bltbdat_wrtn <= 1'b0;
-  end
-
-//channel B barrel shifter
+//channel B barrel shifter: B shifts as BLTBDAT is written, by DMA or by the
+//CPU, with the BSH and DESC of then (WinUAE blitter_loadbdat); a B the CPU
+//wrote with the channel off keeps its shift for the whole blit
 agnus_blitter_barrelshifter barrel_shifter_B
 (
 	.desc(desc),
 	.shift(bsh),
-	.new_val(bltbdat),
+	.new_val(data_in),
 	.old_val(bltbold),
 	.out(shiftbout)
 );
@@ -426,9 +410,14 @@ agnus_blitter_barrelshifter barrel_shifter_B
 always @(posedge clk)
   if (clk7_en) begin
   	if (line)
-  		bltbhold[15:0] <= {16{shiftbout[0]}}; // in line mode only one selected bit of BLTBDAT register (LSB) is used for texturing
-  	// AMR - Contraz Domination uses clr.w bltcon1, which does a phantom read from a w/o register, momentarily enabling line mode and wiping out bltbhold
-  	else if(enable)	// if (bltbdat_wrtn)
+  	begin
+  		// in line mode one bit of BLTBDAT, BSH counting down, is the texture
+  		// (AMR - Contraz Domination's clr.w bltcon1 does a phantom read from a
+  		// w/o register, momentarily enabling line mode: only a line blit uses it)
+  		if (busy)
+  			bltbhold[15:0] <= {16{bltbdat[bsh]}};
+  	end
+  	else if (reg_address_in[8:1]==BLTBDAT[8:1])
   		bltbhold[15:0] <= shiftbout[15:0];
   end
 	
@@ -830,7 +819,7 @@ always @(*)
 			enaptr = enable;
 			incptr = 0;
 			decptr = 0;
-			addmod = 1;//pipeline_full; // update error accumulator
+			addmod = usea; // update error accumulator (USEA off freezes BLTAPT and so the sign, WinUAE)
 			submod = 0;
 			dma_req = 0; // internal cycle - no DMA access
 

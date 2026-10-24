@@ -33,4 +33,10 @@ Chip behaviour fixed against the real chips (2026-10-24; tb/asm/t_chipset):
                          previous chip bus word (WinUAE's AGA sprite notes)
   denise_collision.v     collisions accumulate at every 28 MHz clock (hires and
                          shres pixels were missed at 7 MHz)
+  agnus_blitter.v        B's old word is zero when a blit starts, and B shifts
+                         as BLTBDAT is written (DMA or CPU, the BSH and DESC
+                         of then): the first word shifted in the CPU's BLTBDAT,
+                         a CPU-written B (channel off) shifted in zeros
+                         (WinUAE blitter_start_init, blitter_loadbdat); a line
+                         without USEA freezes BLTAPT and the sign
 Not done: Paula's attach modes (ADKCON ATVOL/ATPER), see paula_audio_channel.v.

@@ -20,6 +20,7 @@
 //     --customtrace     print writes to DMACON, COP1LC/2LC, COPJMP, BPLCON0, INTENA,
 //                       INTREQ, COLOR00
 //     --dumpchip MS FILE write the 2 MB of chip RAM to FILE at MS milliseconds
+//                       (MS "end": when the run ends)
 //     --cart FILE       upload FILE at $A10000 through Main's UIO_MM2_WR
 //                       protocol (HRTmon is enabled in the config)
 //     --ddrpeek ADDR    at the end, print the long word at DDR3 physical ADDR
@@ -298,6 +299,7 @@ int main(int argc, char **argv)
 	int speed = 0, mbram = 3, z3 = 0, baud = 9600;
 	bool fast = false, ntsc = false, lbtrace = false, quiet = false, iostat = false, customtrace = false;
 	double lbtrace_from = 0, dump_ms = -1, freeze_ms = -1;
+	bool dump_end = false;
 	const char *dump_file = nullptr, *cart = nullptr;
 	bool cart_config = false;
 	const char *extrom = nullptr;
@@ -323,7 +325,7 @@ int main(int argc, char **argv)
 		else if (a == "--quiet") quiet = true;
 		else if (a == "--iostat") iostat = true;
 		else if (a == "--customtrace") customtrace = true;
-		else if (a == "--dumpchip") { dump_ms = atof(next()); dump_file = next(); }
+		else if (a == "--dumpchip") { const char *t = next(); dump_end = !strcmp(t, "end"); dump_ms = dump_end ? -1 : atof(t); dump_file = next(); }
 		else if (a == "--cart") cart = next();
 		else if (a == "--cart-config") cart_config = true;
 		else if (a == "--extrom") extrom = next();
@@ -480,6 +482,10 @@ int main(int argc, char **argv)
 		}
 	}
 	if (!uart.line.empty()) printf("[serial] %s\n", uart.line.c_str());
+	if (dump_file && dump_end) {
+		dump_chip(dump_file);
+		printf("[dump] chip RAM to %s at %.3f ms\n", dump_file, sim_ms());
+	}
 	for (uint32_t a : ddrpeek) {
 		ddr_scope();
 		uint64_t v = ddr_peek64(a >> 3);
