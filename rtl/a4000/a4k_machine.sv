@@ -494,6 +494,7 @@ a4k_budgie budgie
 	.ide_rdata(ide_io_rdata[15:0]),
 	.ide_nodata(ide_nodata),
 	.ide_irq(ide_irq),
+	.ide_reset(~(sys_rst_n & cpu_rsto_sys_n)),
 	.ide_present(ide_present),
 
 	.z2_addr(z2_addr),

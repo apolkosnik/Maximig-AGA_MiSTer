@@ -29,7 +29,7 @@ module ide
 	input             clk,
 	input             rst_n,
 
-	output reg        irq,
+	output            irq,
 	output            drq,
 	
 	input             use_fast, // 1 - supports fast read mode
@@ -180,11 +180,15 @@ always @(posedge clk) begin
 	else if(io_done & drq & ~last_read)      request <= 3'b101; // data send/recv
 end
 
+// the device's interrupt pending; nIEN only releases INTRQ, the pending
+// state is unaffected (ATA Device Control)
+reg irq_pend;
 always @(posedge clk) begin
-	if(reset)                                                                      irq <= 1'b0;
-	else if(mgmt_write && mgmt_address == 5 && mgmt_writedata[10] && ~disable_irq) irq <= 1'b1;
-	else if((io_read | io_wr) && io_address == 7)                                  irq <= 1'b0;
+	if(reset)                                                     irq_pend <= 1'b0;
+	else if(mgmt_write && mgmt_address == 5 && mgmt_writedata[10]) irq_pend <= 1'b1;
+	else if((io_read | io_wr) && io_address == 7)                 irq_pend <= 1'b0;
 end
+assign irq = irq_pend & ~disable_irq;
 
 always @(posedge clk) begin
 	case(mgmt_address)
@@ -216,9 +220,11 @@ end
 
 wire reset = ~rst_n | sw_reset;
 
+// nIEN and HOB are Device Control bits the host writes: SRST does not
+// change them, and the write that ends SRST sets them (ATA)
 reg disable_irq;
 always @(posedge clk) begin
-	if(reset)                          disable_irq <= 1'b0;
+	if(~rst_n)                         disable_irq <= 1'b0;
 	else if(io_wr && io_address == 14) disable_irq <= io_writedata[1];
 end
 
@@ -228,10 +234,12 @@ always @(posedge clk) begin
 	else if(io_wr && io_address == 14) sw_reset <= io_writedata[2];
 end
 
+// a write to a Command Block register clears HOB (ATA-6)
 reg hob_pre;
 always @(posedge clk) begin
-	if(reset)                          hob_pre <= 1'b0;
+	if(~rst_n)                         hob_pre <= 1'b0;
 	else if(io_wr && io_address == 14) hob_pre <= io_writedata[7];
+	else if(io_wr && !io_address[3])   hob_pre <= 1'b0;
 end
 
 reg hob;

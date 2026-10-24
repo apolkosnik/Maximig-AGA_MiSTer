@@ -7,6 +7,8 @@
 #   t_hrtmon_mmu  HRTmon's NMI entry with the vector table MMU-translated
 #   t_timing  Copperline's accelprobe rows against the real A4000/A3640
 #             (timing_check.py)
+#   tb_ide, tb_hps  the IDE (ide.v, Budgie, hps_ext) with Main's side
+#             played by the bench (tb/ide/run.sh)
 #   t_blitter 650 random blits (area, fill, descending, lines) against a
 #             model of the blitter from WinUAE (blitter_check.py)
 # OBJ=<dir> picks the simulator build (default obj_tests, rebuilt here).
@@ -38,6 +40,8 @@ if PYTHONDONTWRITEBYTECODE=1 python3 blitter_check.py --sim ./$OBJ/Vtb_top; then
 else
 	echo "t_blitter FAIL"; fail=1
 fi
+
+if ../ide/run.sh; then :; else fail=1; fi
 
 [ $fail -eq 0 ] && echo "ALL PASSED" || echo "FAILURES"
 exit $fail

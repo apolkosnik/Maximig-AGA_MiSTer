@@ -34,3 +34,5 @@ __pycache__/
 main_patch/build/
 # build logs
 logs/
+tb/ide/obj_*/
+tb/ide/*.log

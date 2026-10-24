@@ -80,6 +80,7 @@ module a4k_budgie
 	input      [15:0] ide_rdata,
 	input             ide_nodata,   // fast-read data not there yet
 	input             ide_irq,
+	input             ide_reset,     // the IDE's reset (RST): clears the latched interrupt status
 	input       [1:0] ide_present,  // drives fitted (ide.v drive_en)
 
 	// Zorro II boards: 68000-style A2065, strobed Toccata
@@ -159,6 +160,7 @@ always @(posedge clk) begin
 		tocc_rd   <= 1'b0;
 		tocc_hwr  <= 1'b0;
 		tocc_lwr  <= 1'b0;
+		irq_seen  <= 1'b0;
 	end
 	else begin
 		ide_rd <= 1'b0;
@@ -355,8 +357,10 @@ always @(posedge clk) begin
 			default: st <= S_IDLE;
 		endcase
 
-		// INTRQ is held for the interrupt status register until it is read
-		if (ide_irq) irq_seen <= 1'b1;
+		// INTRQ is held for the interrupt status register until it is read,
+		// or the IDE is reset with the machine (RST: a warm reset, RESET)
+		if (ide_reset) irq_seen <= 1'b0;
+		else if (ide_irq) irq_seen <= 1'b1;
 
 		// the bridge latches AS at 7 MHz edges: once AS has been negated over
 		// one, and DTACK has followed, the next cycle may start
