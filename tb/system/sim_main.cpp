@@ -22,6 +22,7 @@
 //     --dumpchip MS FILE write the 2 MB of chip RAM to FILE at MS milliseconds
 //     --cart FILE       upload FILE at $A10000 through Main's UIO_MM2_WR
 //                       protocol (HRTmon is enabled in the config)
+//     --cart-config     after --cart, write HRTmon's configuration as Main does
 //     --freeze-ms N     press F11 after N simulated milliseconds of running
 //     --quiet           no progress lines
 //     --vcd FILE        (TRACE=1 builds) write an FST waveform of
@@ -249,6 +250,7 @@ int main(int argc, char **argv)
 	bool fast = false, ntsc = false, lbtrace = false, quiet = false, iostat = false, customtrace = false;
 	double lbtrace_from = 0, dump_ms = -1, freeze_ms = -1;
 	const char *dump_file = nullptr, *cart = nullptr;
+	bool cart_config = false;
 	long pctrace = 0;
 	Video video;
 	for (int i = 1; i < argc; i++) {
@@ -272,6 +274,7 @@ int main(int argc, char **argv)
 		else if (a == "--customtrace") customtrace = true;
 		else if (a == "--dumpchip") { dump_ms = atof(next()); dump_file = next(); }
 		else if (a == "--cart") cart = next();
+		else if (a == "--cart-config") cart_config = true;
 		else if (a == "--freeze-ms") freeze_ms = atof(next());
 #if VM_TRACE
 		else if (a == "--vcd") {
@@ -307,6 +310,20 @@ int main(int argc, char **argv)
 	uio_cmd({0xF7, 0x00});                                      // floppy: one drive
 	uio_cmd({0xF8, 0x00});                                      // no hard disks
 	if (cart && !load_cart(cart)) return 2;
+	if (cart && cart_config) {
+		// the configuration Main's UploadActionReplay() writes after the image
+		// (support/minimig/minimig_config.cpp): +20 and +68 of $A10000; for
+		// Maximig a1200 = 0, so HRTmon drives the A4000 IDE ($DD2020, $DD3020),
+		// not Gayle's ($DA2000), which nothing answers here
+		uio_cmd({0xF0, 0x14, 0x00, 0xA1, 0x00,
+		         0x00, 0x80, 0x00, 0x00,     // mon_size
+		         0x00, 0x5A, 0x0F, 0xFF,     // col0h col0l col1h col1l
+		         0xFF, 0x00, 0xFF, 0xFF,     // right keyboard key ide
+		         0x00, 0xFF, 0xFF, 0x0F,     // a1200 aga insert delay
+		         0xFF, 0x00, (uint8_t)(ntsc ? 1 : 0), 0xFF,   // lview cd32 screenmode novbr
+		         0x00, 0x01});               // entered hexmode
+		uio_cmd({0xF0, 0x44, 0x00, 0xA1, 0x00, 0x00, 0x20, 0x00, 0x00});   // maxchip: 2 MB
+	}
 	uio_cmd({0xF1, 0x03});                                      // release halt, keep reset
 	idle_sys(1000);
 	uio_cmd({0xF1, 0x00});                                      // run

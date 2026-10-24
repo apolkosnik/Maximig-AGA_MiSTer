@@ -155,7 +155,8 @@ localparam [4:0]
 	T_SHARE  = 5'd18,  // DDR3: HPS share window ($DD4000-$DD5FFF)
 	T_CPUSP  = 5'd19,  // CPU space (MOVES with FC 7): bus error
 	T_FLOAT  = 5'd20,  // nothing answers where Gary does not time out: floats
-	T_NMIV   = 5'd21;  // the HRTmon cartridge's NMI vector
+	T_NMIV   = 5'd21,  // the HRTmon cartridge's NMI vector
+	T_CART   = 5'd22;  // SDRAM: the HRTmon cartridge's RAM
 
 // slow bus target numbers (a4k_budgie)
 localparam [2:0] SB_CHIP = 3'd0, SB_CREG = 3'd1, SB_CIA = 3'd2, SB_RTC = 3'd3,
@@ -202,7 +203,10 @@ always @(*) begin
 		casez (a[23:16])
 			8'b000?_????: dec = (ovl && !lb_we && a[23:19] == 5'd0) ? T_ROM : T_CHIP;   // $000000-$1FFFFF
 			8'hBF:        dec = T_CIA;
-			8'hA?:        dec = cart_on ? T_CREG : T_FLOAT;                         // the cartridge
+			// the cartridge: its RAM ($A00000-$A7FFFF) straight from SDRAM, where
+			// it lives, so HRTmon runs at the CPU's speed; the custom register
+			// mirror ($A9F000) on the chip bus
+			8'hA?:        dec = !cart_on ? T_FLOAT : (a[23:19] == 5'b10100) ? T_CART : T_CREG;
 			8'hC?:        dec = T_CREG;                                              // Fat Gary's mirror
 			8'hDC:        dec = T_RTC;
 			8'hDD:        dec = (a[15:13] == 3'b001) ? T_IDE : (a[15:13] == 3'b010) ? T_SHARE : T_NONE;
@@ -377,7 +381,8 @@ reg        ddb_v;
 reg [28:4] ddb_a;
 reg[127:0] ddb_d;
 
-wire [24:2] sd_byte = (dec == T_ROM) ? {5'b00111, 1'b1, lb_addr[18:2]}            // 0x780000 + offset
+wire [24:2] sd_byte = (dec == T_ROM)  ? {5'b00111, 1'b1, lb_addr[18:2]}           // 0x780000 + offset
+                   : (dec == T_CART) ? {6'b001101, lb_addr[18:2]}                // 0x680000 + offset
                                      : {1'b1, lb_addr[23:2]};                   // 0x1000000 + offset
 reg  [28:2] dd_byte;
 always @(*) begin
@@ -508,9 +513,11 @@ always @(posedge clk) begin
 					need     <= 6'd0;
 					st       <= S_PORT;
 				end
-				T_ROM, T_MBRAM: begin
+				T_ROM, T_MBRAM, T_CART: begin
 					if (dec == T_ROM)
 						need <= fast ? 6'd0 : {4'd0, rom_speed} + 6'd5;
+					else if (dec == T_CART)
+						need <= fast ? 6'd0 : 6'd5;
 					else begin
 						// Ramsey: wait out a refresh, then the access
 						logic [5:0] acc;
