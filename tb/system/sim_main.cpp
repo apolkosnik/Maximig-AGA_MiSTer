@@ -23,6 +23,7 @@
 //     --cart FILE       upload FILE at $A10000 through Main's UIO_MM2_WR
 //                       protocol (HRTmon is enabled in the config)
 //     --ddrpeek ADDR    at the end, print the long word at DDR3 physical ADDR
+//     --extrom FILE     load FILE at $E00000 (SDRAM 0x700000), as Main does
 //     --cart-config     after --cart, write HRTmon's configuration as Main does
 //     --freeze-ms N     press F11 after N simulated milliseconds of running
 //     --quiet           no progress lines
@@ -144,6 +145,21 @@ static bool load_rom(const char *path)
 	return true;
 }
 
+// an extension ROM, where Main uploads the other half of a 1 MB Kickstart
+// ($E00000-$E7FFFF, SDRAM 0x700000)
+static bool load_extrom(const char *path)
+{
+	FILE *f = fopen(path, "rb");
+	if (!f) { fprintf(stderr, "cannot open %s\n", path); return false; }
+	std::vector<uint8_t> b(0x80000, 0);
+	size_t n = fread(b.data(), 1, b.size(), f);
+	fclose(f);
+	sdram_scope();
+	for (uint32_t i = 0; i < n; i += 2)
+		sdram_poke16((0x700000 + i) >> 1, (b[i] << 8) | b[i + 1]);
+	return true;
+}
+
 // Upload through userio and the halted CPU's chip-bus bridge, as Main's
 // SendFileV2 does.  Direct SDRAM pokes would miss upload/decode failures.
 static bool load_cart(const char *path)
@@ -252,6 +268,7 @@ int main(int argc, char **argv)
 	double lbtrace_from = 0, dump_ms = -1, freeze_ms = -1;
 	const char *dump_file = nullptr, *cart = nullptr;
 	bool cart_config = false;
+	const char *extrom = nullptr;
 	std::vector<uint32_t> ddrpeek;
 	long pctrace = 0;
 	Video video;
@@ -277,6 +294,7 @@ int main(int argc, char **argv)
 		else if (a == "--dumpchip") { dump_ms = atof(next()); dump_file = next(); }
 		else if (a == "--cart") cart = next();
 		else if (a == "--cart-config") cart_config = true;
+		else if (a == "--extrom") extrom = next();
 		else if (a == "--ddrpeek") ddrpeek.push_back((uint32_t)strtoul(next(), nullptr, 0));
 		else if (a == "--freeze-ms") freeze_ms = atof(next());
 #if VM_TRACE
@@ -313,6 +331,7 @@ int main(int argc, char **argv)
 	uio_cmd({0xF7, 0x00});                                      // floppy: one drive
 	uio_cmd({0xF8, 0x00});                                      // no hard disks
 	if (cart && !load_cart(cart)) return 2;
+	if (extrom && !load_extrom(extrom)) return 2;
 	if (cart && cart_config) {
 		// the configuration Main's UploadActionReplay() writes after the image
 		// (support/minimig/minimig_config.cpp): +20 and +68 of $A10000; for

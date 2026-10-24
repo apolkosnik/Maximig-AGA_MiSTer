@@ -11,10 +11,10 @@ set -e
 cd "$(dirname "$0")"
 OBJ=${OBJ:-obj_tests}
 OBJ=$OBJ ./build.sh > build_tests.log 2>&1 || { tail -30 build_tests.log; exit 1; }
-../asm/build.sh t_board t_timing hrtmon_stub t_hrtmon_mmu > /dev/null
+../asm/build.sh t_board t_timing hrtmon_stub t_hrtmon_mmu extrom_pattern > /dev/null
 
 fail=0
-out=$(timeout 1800 ./$OBJ/Vtb_top --rom ../asm/build/t_board.rom --cart ../asm/build/hrtmon_stub.bin --ms 400 --quiet 2>&1) || true
+out=$(timeout 1800 ./$OBJ/Vtb_top --rom ../asm/build/t_board.rom --cart ../asm/build/hrtmon_stub.bin --extrom ../asm/build/extrom_pattern.bin --ms 400 --quiet 2>&1) || true
 echo "$out" | grep -v '^\[sim\]'
 if echo "$out" | grep -q '^\[mailbox\].*result 600D'; then echo "t_board  PASS"; else echo "t_board  FAIL"; fail=1; fi
 

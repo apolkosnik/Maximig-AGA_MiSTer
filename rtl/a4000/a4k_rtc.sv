@@ -77,6 +77,16 @@ always @(*) begin
 	else                         hour12 = hour;
 end
 
+// a 12-hour write: the hour from its tens digit, ones digit and PM flag, as
+// the 24-hour BCD the clock keeps (12 AM is 00, 12 PM is 12)
+function automatic [7:0] from12(input [3:0] tens, input [3:0] ones, input p);
+	logic [4:0] h;
+	h = tens[0] * 4'd10 + ones;
+	if (h == 5'd12) h = p ? 5'd12 : 5'd0;
+	else if (p)     h = h + 5'd12;
+	from12 = (h >= 5'd20) ? {4'd2, 4'(h - 5'd20)} : (h >= 5'd10) ? {4'd1, 4'(h - 5'd10)} : {4'd0, 4'(h)};
+endfunction
+
 always @(*) begin
 	rdata = 4'h0;
 	if (bank >= 2'd2 && reg_sel < 4'hD) rdata = bank[0] ? ram[reg_sel][7:4] : ram[reg_sel][3:0];
@@ -166,8 +176,8 @@ always @(posedge clk) begin
 			4'h1: sec[7:4]  <= wdata & 4'h7;
 			4'h2: min[3:0]  <= wdata;
 			4'h3: min[7:4]  <= wdata & 4'h7;
-			4'h4: hour[3:0] <= wdata;
-			4'h5: hour[7:4] <= wdata & 4'h3;
+			4'h4: hour <= h24 ? {hour[7:4], wdata} : from12(hour12[7:4], wdata, pm);
+			4'h5: hour <= h24 ? {wdata & 4'h3, hour[3:0]} : from12({3'd0, wdata[0]}, hour12[3:0], wdata[1]);
 			4'h6: wday      <= wdata[2:0];
 			4'h7: mday[3:0] <= wdata;
 			4'h8: mday[7:4] <= wdata & 4'h3;

@@ -1,4 +1,4 @@
-From bddec6060b9925119614c905e99cf1ccefdd2ef5 Mon Sep 17 00:00:00 2001
+From a3e6d2c731411cb104b62837f2193ab17eac794c Mon Sep 17 00:00:00 2001
 From: Adam Polkosnik <apolkosnik@gmail.com>
 Date: Fri, 23 Oct 2026 14:11:51 -0400
 Subject: [PATCH] Add the Maximig (Amiga 4000/040) core to the Minimig family
@@ -14,10 +14,10 @@ drives are not offered.  A new configuration defaults to 2 MB chip RAM,
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
  menu.cpp                           | 97 +++++++++++++++++++++++-------
- support/minimig/minimig_config.cpp | 13 +++-
+ support/minimig/minimig_config.cpp | 14 ++++-
  user_io.cpp                        | 10 ++-
  user_io.h                          |  1 +
- 4 files changed, 95 insertions(+), 26 deletions(-)
+ 4 files changed, 95 insertions(+), 27 deletions(-)
 
 diff --git a/menu.cpp b/menu.cpp
 index d97bfbd..4a1f076 100644
@@ -143,7 +143,7 @@ index d97bfbd..4a1f076 100644
  				int cd32_on = minimig_config.cd32_drive.cfg ? 1 : 0;
  				int cdtv_on = minimig_config.cdtv_drive.cfg ? 1 : 0;
 diff --git a/support/minimig/minimig_config.cpp b/support/minimig/minimig_config.cpp
-index c0a5b92..dead6da 100644
+index c0a5b92..d2ed55e 100644
 --- a/support/minimig/minimig_config.cpp
 +++ b/support/minimig/minimig_config.cpp
 @@ -319,7 +319,9 @@ static char UploadActionReplay()
@@ -157,7 +157,7 @@ index c0a5b92..dead6da 100644
  		spi8((data >> 0) & 0xff);
  		data = minimig_config.chipset&CONFIG_AGA ? 0xff : 0; // aga, 1 byte
  		spi8((data >> 0) & 0xff);
-@@ -586,6 +588,15 @@ int minimig_cfg_load(int num)
+@@ -586,9 +588,17 @@ int minimig_cfg_load(int num)
  		minimig_config.memory = 0x11;
  		minimig_config.cpu = 0;
  		minimig_config.chipset = 0;
@@ -168,11 +168,14 @@ index c0a5b92..dead6da 100644
 +			snprintf(minimig_config.kickstart, sizeof(minimig_config.kickstart) - 1, "%s/%s", HomeDir(), "KICK4000.ROM");
 +			minimig_config.memory = 0x0F;
 +			minimig_config.chipset = CONFIG_AGA | CONFIG_ECS;
-+			minimig_config.ide_cfg = 1;
 +		}
  		minimig_config.floppy.speed = CONFIG_FLOPPY2X;
  		minimig_config.floppy.drives = 1;
- 		minimig_config.ide_cfg = 0;
+-		minimig_config.ide_cfg = 0;
++		minimig_config.ide_cfg = is_maximig() ? 1 : 0;   // the A4000 has its IDE port on the board
+ 		minimig_config.hardfile[0].cfg = 1;
+ 		minimig_config.hardfile[0].filename[0] = 0;
+ 		minimig_config.hardfile[1].cfg = 1;
 diff --git a/user_io.cpp b/user_io.cpp
 index 8f41625..c323fb0 100644
 --- a/user_io.cpp

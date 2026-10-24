@@ -11,13 +11,14 @@
 ;  50-59  CIA-A: timer A latch read back
 ;  60-79  AUTOCONFIG: the chain at $E80000, the RTG board configured and its
 ;         framebuffer and registers answering
-;  80-89  A4000 IDE with no drive, the RP5C01
+;  80-89  A4000 IDE with no drive, the RP5C01 (12-hour writes included)
 ;  90-99  unanswered cycles (floating, Gary's DSACK timeout), CPU space
 ;         (bus error), an autovectored interrupt
 ;  100-109 chipset DMA: the copper started by COPJMP1, COPJMP2 and the start
 ;         of the frame (its MOVEs to INTREQ seen by the CPU), the blitter
 ;         (a copy, an inverting blit with an A modulo)
 ;  110-119 the RESET instruction: Paula and CIA-A reset, the overlay back
+;  140-149 an extension ROM at $E00000 (bench: --extrom, the pattern file)
 ;  130-139 the HRTmon cartridge: the Help key's NMI (CIA-A, level 7) enters
 ;         at $A1000C with the VBR in motherboard RAM (bench: --cart, mark 4)
 ;  120-129 the HPS share window ($DD4000): a request flag Main recognises,
@@ -242,6 +243,43 @@ start:
 	bls.s	.bcd
 	TFAIL	85
 .bcd:
+	; 12-hour mode: an hour written as its digits and the PM flag
+	move.b	#$09,$DC0037            ; bank 1
+	move.b	#$00,$DC002B            ; register A: 12-hour
+	move.b	#$08,$DC0037            ; bank 0
+	move.b	#$02,$DC0017            ; hour tens: PM, 0
+	move.b	#$01,$DC0013            ; hour ones: 1 -> 1 PM
+	move.b	$DC0013,d0
+	and.l	#$0F,d0
+	TCHECK	d0,$01,86
+	move.b	$DC0017,d0
+	and.l	#$0F,d0
+	TCHECK	d0,$02,87
+	move.b	#$09,$DC0037
+	move.b	#$01,$DC002B            ; 24-hour: 1 PM is 13
+	move.b	#$08,$DC0037
+	move.b	$DC0017,d0
+	and.l	#$0F,d0
+	lsl.l	#4,d0
+	move.b	$DC0013,d1
+	and.l	#$0F,d1
+	or.l	d1,d0
+	TCHECK	d0,$13,88
+	move.b	#$09,$DC0037
+	move.b	#$00,$DC002B            ; 12-hour again: 12 AM, midnight
+	move.b	#$08,$DC0037
+	move.b	#$01,$DC0017
+	move.b	#$02,$DC0013
+	move.b	#$09,$DC0037
+	move.b	#$01,$DC002B            ; 24-hour: 00
+	move.b	#$08,$DC0037
+	move.b	$DC0017,d0
+	and.l	#$0F,d0
+	lsl.l	#4,d0
+	move.b	$DC0013,d1
+	and.l	#$0F,d1
+	or.l	d1,d0
+	TCHECK	d0,$00,89
 
 ;--- unanswered cycles, CPU space, interrupts -------------------------------------
 	move.l	$00200000,d0            ; Zorro II memory space, empty: floats
@@ -429,6 +467,11 @@ after_berr:
 	move.w	#$7FFF,$96(a1)
 	moveq	#0,d0
 	movec	d0,vbr
+
+	move.l	$E00000,d0              ; the extension ROM (bench: --extrom)
+	TCHECK	d0,$E0E0C0DE,140
+	move.l	$E00004,d0
+	TCHECK	d0,$12345678,141
 
 	TPRINT	msg_pass
 	TPASS	0
