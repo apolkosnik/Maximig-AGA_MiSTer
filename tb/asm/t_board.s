@@ -18,7 +18,7 @@
 ;         of the frame (its MOVEs to INTREQ seen by the CPU), the blitter
 ;         (a copy, an inverting blit with an A modulo)
 ;  110-119 the RESET instruction: Paula and CIA-A reset, the overlay back
-;  140-149 an extension ROM at $E00000 (bench: --extrom, the pattern file)
+;  140-149 an extension ROM at $E00000 and $F00000 (bench: --extrom, the pattern file)
 ;  130-139 the HRTmon cartridge: the Help key's NMI (CIA-A, level 7) enters
 ;         at $A1000C with the VBR in motherboard RAM (bench: --cart, mark 4)
 ;  120-129 the HPS share window ($DD4000): a request flag Main recognises,
@@ -66,16 +66,18 @@ start:
 	TCHECK	d0,$0F,12
 	move.b	$DE0003,d0              ; control: 1M x 4, refresh 238 clocks
 	TCHECK	d0,$28,13
-	move.b	#$2D,$DE0003            ; + page mode, wrap
-	move.b	$DE0003,d0              ; not yet: until the next refresh
-	TCHECK	d0,$28,14
+	move.b	#$2D,$DE0003            ; + page mode, wrap: taken at the next refresh
 	move.w	#2000,d1
 .rw:	move.b	$DE0003,d0
 	cmp.b	#$2D,d0
 	beq.s	.rok
 	dbra	d1,.rw
 	TFAIL	15
+	; a refresh has just applied it (they come every 238 clocks, ~9 us): a
+	; write now is read back unchanged until the next one
 .rok:	move.b	#$28,$DE0003            ; back to standard mode
+	move.b	$DE0003,d0              ; not yet
+	TCHECK	d0,$2D,14
 	move.w	#2000,d1
 .rw2:	move.b	$DE0003,d0
 	cmp.b	#$28,d0
@@ -472,6 +474,8 @@ after_berr:
 	TCHECK	d0,$E0E0C0DE,140
 	move.l	$E00004,d0
 	TCHECK	d0,$12345678,141
+	move.l	$F00000,d0              ; and again at $F00000: loaded, so a DiagROM's place
+	TCHECK	d0,$E0E0C0DE,142
 
 	TPRINT	msg_pass
 	TPASS	0

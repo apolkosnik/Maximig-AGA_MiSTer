@@ -23,7 +23,8 @@
 //     --cart FILE       upload FILE at $A10000 through Main's UIO_MM2_WR
 //                       protocol (HRTmon is enabled in the config)
 //     --ddrpeek ADDR    at the end, print the long word at DDR3 physical ADDR
-//     --extrom FILE     load FILE at $E00000 (SDRAM 0x700000), as Main does
+//     --extrom FILE     upload FILE at $E00000 as Main does (the core then shows
+//                       it at $F00000 too)
 //     --cart-config     after --cart, write HRTmon's configuration as Main does
 //     --freeze-ms N     press F11 after N simulated milliseconds of running
 //     --quiet           no progress lines
@@ -149,14 +150,19 @@ static bool load_rom(const char *path)
 // ($E00000-$E7FFFF, SDRAM 0x700000)
 static bool load_extrom(const char *path)
 {
+	// through userio with the CPU halted, as Main's UploadKickstartWithExtRom
+	// does: the chipset marks the extension ROM loaded (shown at $F00000 too)
 	FILE *f = fopen(path, "rb");
 	if (!f) { fprintf(stderr, "cannot open %s\n", path); return false; }
 	std::vector<uint8_t> b(0x80000, 0);
 	size_t n = fread(b.data(), 1, b.size(), f);
 	fclose(f);
-	sdram_scope();
-	for (uint32_t i = 0; i < n; i += 2)
-		sdram_poke16((0x700000 + i) >> 1, (b[i] << 8) | b[i + 1]);
+	for (uint32_t i = 0; i < n; i += 512) {
+		uint32_t a = 0xE00000 + i;
+		std::vector<uint8_t> cmd = {0xF0, (uint8_t)a, (uint8_t)(a >> 8), (uint8_t)(a >> 16), 0};
+		for (uint32_t k = 0; k < 512; k++) cmd.push_back(i + k < n ? b[i + k] : 0);
+		uio_cmd(cmd);
+	}
 	return true;
 }
 

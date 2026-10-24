@@ -60,6 +60,7 @@ module a4k_lbus
 	input             toccata_fit,
 	input       [1:0] rom_speed,     // ROM jumpers: 5, 6, 7, 8 CPU clocks
 	input             ovl,           // CIA-A OVL: ROM at $000000 for reads
+	input             extrom_on,     // an extension ROM is loaded: shown at $F00000 too
 	input             iack7_t,       // the card: toggles at a level-7 interrupt acknowledge
 	input      [31:0] dbg_pc,        // the CPU's PC, for the PC sampler
 
@@ -216,6 +217,7 @@ always @(*) begin
 			8'hE8:        dec = T_ACZ2;
 			8'b1111_1???: dec = T_ROM;                                               // $F80000-$FFFFFF
 			8'b1110_0???: dec = T_ROM;                                               // $E00000-$E7FFFF: a 1 MB ROM's other half
+			8'b1111_0???: dec = extrom_on ? T_ROM : T_FLOAT;                         // $F00000-$F7FFFF: the extension ROM again (a DiagROM, residents)
 			default:      dec = (a[23:16] < 8'hB8 || (a[23:16] >= 8'hE8 && a[23:16] < 8'hF8)) ? T_FLOAT : T_NONE;
 		endcase
 		if (a2065_ena && a[23:16] == a2065_base)     dec = T_A2065;
@@ -384,7 +386,7 @@ reg        ddb_v;
 reg [28:4] ddb_a;
 reg[127:0] ddb_d;
 
-wire [24:2] sd_byte = (dec == T_ROM)  ? {5'b00111, lb_addr[23:19] != 5'b11100, lb_addr[18:2]}  // 0x780000 (0x700000 for $E00000) + offset
+wire [24:2] sd_byte = (dec == T_ROM)  ? {5'b00111, lb_addr[23:19] != 5'b11100 && lb_addr[23:19] != 5'b11110, lb_addr[18:2]}  // 0x780000 (0x700000: $E00000, $F00000) + offset
                    : (dec == T_CART) ? {6'b001101, lb_addr[18:2]}                // 0x680000 + offset
                                      : {1'b1, lb_addr[23:2]};                   // 0x1000000 + offset
 reg  [28:2] dd_byte;

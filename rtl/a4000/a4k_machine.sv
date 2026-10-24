@@ -347,6 +347,7 @@ wire        a2065_ena, toccata_ena;
 wire  [7:0] a2065_base, toccata_base;
 
 wire        ovl;
+wire        extrom_on;           // the chipset: an extension ROM is loaded
 
 a4k_lbus lbus
 (
@@ -365,6 +366,7 @@ a4k_lbus lbus
 	.toccata_fit(1'b1),
 	.rom_speed(2'd1),
 	.ovl(ovl),
+	.extrom_on(extrom_on),
 	.iack7_t(iack7_t),
 	.dbg_pc(dbg_pc),
 
@@ -856,6 +858,7 @@ a4k_chipset chipset
 	.int2_ext     (ide_irq | a2065_int2),
 	.int6_ext     (toccata_int6     ),
 	.ovl          (ovl              ),
+	.extrom_on    (extrom_on        ),
 
 	.cpucfg       (cpucfg           ),
 	.cachecfg     (cachecfg         ),

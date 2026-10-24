@@ -118,6 +118,7 @@ module a4k_chipset
 
 	// the OVL bit (CIA-A PA0) for the motherboard's ROM decode
 	output reg    ovl,
+	output reg    extrom_on = 1'b0,   // an extension ROM has been uploaded since the last halt
 
 	// user i/o
 	output  [4:0] cpucfg,
@@ -186,6 +187,17 @@ wire        dbs = a[23:21] == 3'b000 || a[23:20] == 4'hC || a[23:16] == 8'hDF;
 wire        sel_cart = !dbr && a[23:19] == 5'b10100;                  // $A00000-$A7FFFF
 wire        sel_cmirror = !dbr && cpu_rd && a[23:12] == 12'hA9F;       // $A9F000-$A9FFFF
 wire        ram_sel = dbr | sel_chip | sel_kick | sel_ext | sel_cart;
+
+// Main uploads an extension ROM (or a 1 MB Kickstart's first half) to
+// $E00000 with the CPU halted, after halting it for the reload: the local
+// bus shows it at $F00000 too only then, so nothing stale there passes for
+// a DiagROM ($1111) at reset
+reg         cpuhlt_d = 1'b0;
+always @(posedge clk) begin
+	cpuhlt_d <= cpuhlt;
+	if (cpuhlt && !cpuhlt_d)                    extrom_on <= 1'b0;
+	else if (sel_ext && (cpu_hwr || cpu_lwr))   extrom_on <= 1'b1;
+end
 wire        freeze;                                                    // CIA-A: the HRTmon key
 
 // video
