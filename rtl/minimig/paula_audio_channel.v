@@ -355,7 +355,7 @@ always @(*) begin
         audio_next = AUDIO_STATE_3;
         AUDxDR = 1'b1;
         AUDxIR = 1'b0;
-        lencount = ~lenfin;
+        lencount = 1'b0;  //the length counted at state 1's word only (WinUAE audio.cpp state 5)
         pbufld1 = 1'b1;  //new data has been just received so put it in the output buffer
         percntrld = 1'b1;
         volcntrld = 1'b1;

@@ -9,6 +9,7 @@
 #             (timing_check.py)
 #   tb_ide, tb_hps  the IDE (ide.v, Budgie, hps_ext) with Main's side
 #             played by the bench (tb/ide/run.sh)
+#   tb_audio, tb_pot  Paula's audio DMA blocks, the analog pots (tb/paula/run.sh)
 #   tb_memory, tb_card  the local bus, SDRAM (refresh too), DDR3, RTG
 #             registers and CLUT, the A3640 (tb/mem/run.sh)
 #   t_blitter 650 random blits (area, fill, descending, lines) against a
@@ -45,6 +46,7 @@ fi
 
 if ../ide/run.sh; then :; else fail=1; fi
 if ../mem/run.sh; then :; else fail=1; fi
+if ../paula/run.sh; then :; else fail=1; fi
 
 [ $fail -eq 0 ] && echo "ALL PASSED" || echo "FAILURES"
 exit $fail

@@ -38,3 +38,5 @@ tb/ide/obj_*/
 tb/ide/*.log
 tb/mem/obj_*/
 tb/mem/*.log
+tb/paula/obj_*/
+tb/paula/*.log

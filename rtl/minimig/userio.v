@@ -156,8 +156,8 @@ always @ (posedge clk) begin
     end
     else if (pot_cnt_en) begin
 		if (joy_ana_en & joy1enable) begin
-        if (potcnt[0] && {~ajoy1[ 7],ajoy1[ 6:0]} != pot1y) pot0y <= pot0y + 1'd1; else potcnt[0] <= 0;
-        if (potcnt[1] && {~ajoy1[15],ajoy1[14:8]} != pot1x) pot0x <= pot0x + 1'd1; else potcnt[1] <= 0;
+        if (potcnt[0] && {~ajoy1[ 7],ajoy1[ 6:0]} != pot0y) pot0y <= pot0y + 1'd1; else potcnt[0] <= 0;
+        if (potcnt[1] && {~ajoy1[15],ajoy1[14:8]} != pot0x) pot0x <= pot0x + 1'd1; else potcnt[1] <= 0;
       end else begin
         if (!potcap[0]) pot0x <= pot0x + 1'd1;
         if (!potcap[1]) pot0y <= pot0y + 1'd1;

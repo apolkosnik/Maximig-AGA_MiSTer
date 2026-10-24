@@ -177,8 +177,8 @@ wire        sel_kick = !dbr && cpuhlt && a[23:19] == 5'b11111;         // $F8000
 wire        sel_ext  = !dbr && cpuhlt && a[23:19] == 5'b11100;         // $E00000-$E7FFFF
 wire        sel_reg  = a[23:16] == 8'hDF || a[23:20] == 4'hC;          // $DF0000, Fat Gary's $C00000 mirror
 wire        sel_cia  = a[23:16] == 8'hBF;
-wire        sel_cia_a = sel_cia & ~a[12];
-wire        sel_cia_b = sel_cia & ~a[13];
+wire        sel_cia_a = sel_cia & a[15:12] == 4'hE;                    // $BFE000-$BFEFFF (Gary: no mirrors,
+wire        sel_cia_b = sel_cia & a[15:12] == 4'hD;                    // $BFD000-$BFDFFF  never both)
 wire        dbs = a[23:21] == 3'b000 || a[23:20] == 4'hC || a[23:16] == 8'hDF;
 // the HRTmon cartridge (Minimig's cart.v): its RAM at $A00000-$A7FFFF (the
 // HPS uploads hrtmon.rom to $A10000 with the CPU halted) and the custom
@@ -593,7 +593,10 @@ assign _cpu_ipl = int7 ? 3'b000 : _iplx;
 
 // bus multiplexers (gary.v)
 assign ram_data_in    = dbr ? custom_data_out : cpu_data_out;
-assign custom_data_in = dbr ? ram_data_out : cpu_rd ? 16'hFFFF : cpu_data_out;
+// a CPU read reaches the registers as a write too (the address alone selects
+// them): AGA writes 0 there, which leaves INTENA, INTREQ, DMACON, ADKCON as
+// they are (WinUAE custom_wget_1, write-only registers)
+assign custom_data_in = dbr ? ram_data_out : cpu_rd ? 16'h0000 : cpu_data_out;
 assign gary_data_out  = dbr ? 16'h0000 : custom_data_out | ram_data_out | (sel_cmirror ? cmirror_q : 16'h0000);
 assign ram_rd         = dbr ? ~dbwe : cpu_rd;
 assign ram_hwr        = dbr ?  dbwe : cpu_hwr;
@@ -627,10 +630,11 @@ minimig_syscontrol CONTROL1
 	.reset(sys_reset)
 );
 
-// kickstart overlay (CIA-A PA0): set by any reset, cleared by a CIA-A write
+// kickstart overlay: CIA-A PA0, high also while DDRA bit 0 is an input (the
+// pin pulled up: after any reset); porta_out is that (WinUAE bfe001_change)
 always @(posedge clk) begin
-	if(~_cpu_reset | ~cpu_rsto_n)          ovl <= 1;
-	else if(sel_cia_a & (cpu_lwr|cpu_hwr)) ovl <= 0;
+	if(~_cpu_reset | ~cpu_rsto_n) ovl <= 1;
+	else                          ovl <= porta_out[0];
 end
 
 assign _cpu_reset = _rst;

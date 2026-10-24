@@ -21,6 +21,9 @@
 ;         is both halves (the bench's sample counts)
 ;  70-79  sprite collisions at the hires and shres pixel rates, at every
 ;         fine position
+;  99     $E00000 without an extension ROM: Gary's timeout
+;  100-103 a read of INTENA, INTREQ, DMACON, ADKCON (write-only) changes
+;         nothing (AGA writes 0: WinUAE custom_wget_1)
 ;  80-93  bitplanes: hires fine scroll in 35 ns steps (bench: mark 6, line
 ;         150's first/last non-black sample at $1F20); no bitplane DMA with
 ;         more planes than the mode's slots or more than 8; SHRES with HIRES
@@ -50,9 +53,30 @@ start:
 .vec:	move.l	#unexpected,(a0)+
 	dbra	d0,.vec
 	TPRINT	msg_start
+	move.l	$E00000,d0              ; no extension ROM: nothing there (Gary's
+	TCHECK	d0,$FFFFFFFF,99         ; timeout), not SDRAM's ROM area
 	lea	CUSTOM,a1
 	move.w	#$7FFF,$9A(a1)
 	move.w	#$7FFF,$9C(a1)
+
+;--- reads of write-only registers: AGA writes 0 there, nothing changes ----------
+	tst.w	$9A(a1)                 ; INTENA
+	moveq	#0,d0
+	move.w	$1C(a1),d0              ; INTENAR
+	TCHECK	d0,$0000,100
+	tst.w	$9C(a1)                 ; INTREQ
+	move.w	$1E(a1),d0
+	and.w	#$4004,d0               ; INTEN, SOFT: only software sets them
+	TCHECK	d0,$0000,101
+	move.w	#$7FFF,$96(a1)
+	tst.w	$96(a1)                 ; DMACON
+	move.w	$02(a1),d0
+	and.w	#$03FF,d0
+	TCHECK	d0,$0000,102
+	move.w	#$7FFF,$9E(a1)
+	tst.w	$9E(a1)                 ; ADKCON
+	move.w	$10(a1),d0              ; ADKCONR
+	TCHECK	d0,$0000,103
 
 ;--- the HAM palette and RDRAM --------------------------------------------------
 	lea	PLANE1,a0

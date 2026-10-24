@@ -127,6 +127,7 @@ module a4k_lbus
 	output            rtg_pal_wr,
 
 	// observation
+	output reg        gary_ien,      // Gary's interrupt master ($DF809A bit 15): 0 masks every CPU interrupt
 	output reg  [4:0] dbg_tgt,
 	output            dbg_coldboot,
 	output      [7:0] dbg_ramsey
@@ -158,7 +159,8 @@ localparam [4:0]
 	T_CPUSP  = 5'd19,  // CPU space (MOVES with FC 7): bus error
 	T_FLOAT  = 5'd20,  // nothing answers where Gary does not time out: floats
 	T_NMIV   = 5'd21,  // the HRTmon cartridge's NMI vector
-	T_CART   = 5'd22;  // SDRAM: the HRTmon cartridge's RAM
+	T_CART   = 5'd22,  // SDRAM: the HRTmon cartridge's RAM
+	T_GIEN   = 5'd23;  // Gary's interrupt enable ($DF8000-$DFBFFF)
 
 // slow bus target numbers (a4k_budgie)
 localparam [2:0] SB_CHIP = 3'd0, SB_CREG = 3'd1, SB_CIA = 3'd2, SB_RTC = 3'd3,
@@ -203,8 +205,12 @@ always @(*) begin
 		// but not $E80000-$F7FFFF; below $B80000 (the Zorro II memory and
 		// I/O spaces) an unanswered cycle floats too (WinUAE gary_nonrange)
 		casez (a[23:16])
-			8'b000?_????: dec = (ovl && !lb_we && a[23:19] == 5'd0) ? T_ROM : T_CHIP;   // $000000-$1FFFFF
-			8'hBF:        dec = T_CIA;
+			// with OVL the ROM, not chip RAM, is selected at $000000-$07FFFF, for
+			// writes too (it ignores them: Gary)
+			8'b000?_????: dec = (ovl && a[23:19] == 5'd0) ? T_ROM : T_CHIP;             // $000000-$1FFFFF
+			// the CIAs only at $BFD000-$BFDFFF and $BFE000-$BFEFFF, never both,
+			// no mirrors (Gary; WinUAE: Fat Gary's CIA mapping)
+			8'hBF:        dec = (a[15:12] == 4'hD || a[15:12] == 4'hE) ? T_CIA : T_NONE;
 			// the cartridge: its RAM ($A00000-$A7FFFF) straight from SDRAM, where
 			// it lives, so HRTmon runs at the CPU's speed; the custom register
 			// mirror ($A9F000) on the chip bus
@@ -213,10 +219,12 @@ always @(*) begin
 			8'hDC:        dec = T_RTC;
 			8'hDD:        dec = (a[15:13] == 3'b001) ? T_IDE : (a[15:13] == 3'b010) ? T_SHARE : T_NONE;
 			8'hDE:        dec = a[15] ? T_NONE : T_MBRES;
-			8'hDF:        dec = T_CREG;
+			// the chip registers at $DFC000-$DFFFFF (4 KB, four times), Gary's
+			// interrupt enable at $DF8000-$DFBFFF; $DF0000-$DF7FFF is nothing
+			8'hDF:        dec = !a[15] ? T_NONE : a[14] ? T_CREG : T_GIEN;
 			8'hE8:        dec = T_ACZ2;
 			8'b1111_1???: dec = T_ROM;                                               // $F80000-$FFFFFF
-			8'b1110_0???: dec = T_ROM;                                               // $E00000-$E7FFFF: a 1 MB ROM's other half
+			8'b1110_0???: dec = extrom_on ? T_ROM : T_NONE;                         // $E00000-$E7FFFF: a 1 MB ROM's other half
 			8'b1111_0???: dec = extrom_on ? T_ROM : T_FLOAT;                         // $F00000-$F7FFFF: the extension ROM again (a DiagROM, residents)
 			default:      dec = (a[23:16] < 8'hB8 || (a[23:16] >= 8'hE8 && a[23:16] < 8'hF8)) ? T_FLOAT : T_NONE;
 		endcase
@@ -247,7 +255,8 @@ endfunction
 //----------------------------------------------------------------------------
 // Gary's and Ramsey's registers
 //----------------------------------------------------------------------------
-reg        gary_timeout;    // $DE0000 bit 7: 0 DSACK timeout, 1 BERR timeout
+reg        gary_timeout;    // $DE0000 bit 7 written: 0 DSACK timeout, 1 BERR timeout
+reg        gary_timedout;   // $DE0000 bit 7 read: a bus timed out (cleared by the read)
 reg        gary_toenb;      // $DE0001 bit 7: 1 timeout disabled
 reg        gary_coldboot;   // $DE0002 bit 7: power-up detect
 reg  [7:0] ramsey_cfg;      // in effect
@@ -270,7 +279,7 @@ function automatic [7:0] mbres_byte(input [15:0] off, input [1:0] l);
 		                      (x[7:6] == 2'd0) ? ramsey_cfg : 8'hFF;
 		2'd2:    mbres_byte = {gary_coldboot, 7'h7F};
 		2'd1:    mbres_byte = {gary_toenb,    7'h7F};
-		default: mbres_byte = {gary_timeout,  7'h7F};
+		default: mbres_byte = {gary_timedout, 7'h7F};
 	endcase
 endfunction
 
@@ -498,6 +507,8 @@ always @(posedge clk) begin
 	if (io_reset) begin
 		gary_timeout <= 1'b0;
 		gary_toenb   <= 1'b0;
+		gary_timedout <= 1'b0;
+		gary_ien     <= 1'b1;
 	end
 
 	// the line's prefetched quad word arrives
@@ -616,6 +627,9 @@ always @(posedge clk) begin
 				T_MBRES: begin
 					need <= fast ? 6'd0 : CYC_REG;
 					rdata <= mbres_rd;
+					// reading $DE0000 (lane 0 of a long word below $DE8000) returns
+					// the timed-out bit and resets it
+					if (!lb_we && !lb_off[15] && lb_be[3]) gary_timedout <= 1'b0;
 					if (lb_we && !lb_off[15]) begin
 						// (WinUAE mbres_write: below $DE8000)
 						if (lb_be[0] && lb_off[7:6] == 2'd0) begin ramsey_wr <= lb_wdata[7:0]; ramsey_wr_pend <= 1'b1; end
@@ -649,6 +663,13 @@ always @(posedge clk) begin
 				end
 				T_FLOAT: begin
 					need <= fast ? 6'd0 : CYC_AC;
+					st   <= S_WAIT;
+				end
+				T_GIEN: begin
+					// Gary's 16-bit interrupt enable at offset $09A of each 4 KB:
+					// only bit 15 exists (Gary spec, System Interrupt Control)
+					need <= fast ? 6'd0 : CYC_REG;
+					if (lb_we && lb_off[11:2] == 10'h026 && lb_be[1]) gary_ien <= lb_wdata[15];
 					st   <= S_WAIT;
 				end
 				T_NMIV: begin
@@ -777,6 +798,7 @@ always @(posedge clk) begin
 				if (tout != 0) tout <= tout - 1'd1;
 				else begin
 					berr <= gary_timeout;
+					gary_timedout <= 1'b1;
 					st   <= S_DONE;
 				end
 			end

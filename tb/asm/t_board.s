@@ -19,6 +19,9 @@
 ;         (a copy, an inverting blit with an A modulo)
 ;  110-119 the RESET instruction: Paula and CIA-A reset, the overlay back
 ;  140-149 an extension ROM at $E00000 and $F00000 (bench: --extrom, the pattern file)
+;  150-159 Gary's decode: the CIAs only at $BFD000/$BFE000 (no mirrors, never
+;          both), nothing at $DF0000, its interrupt master at $DF809A, the
+;          overlay as CIA-A PA0 (writes under it go to the ROM)
 ;  130-139 the HRTmon cartridge: the Help key's NMI (CIA-A, level 7) enters
 ;         at $A1000C with the VBR in motherboard RAM (bench: --cart, mark 4)
 ;  120-129 the HPS share window ($DD4000): a request flag Main recognises,
@@ -46,9 +49,9 @@ start:
 	TCHECK	d0,$7F,2
 	move.b	$DE0002,d0              ; COLDBOOT: a power-up
 	TCHECK	d0,$FF,3
-	move.b	#$80,$DE0100            ; TIMEOUT through the mirror at +$100
-	move.b	$DE0000,d0
-	TCHECK	d0,$FF,4
+	move.b	#$80,$DE0100            ; TIMEOUT through the mirror at +$100: BERR mode
+	move.b	$DE0000,d0              ; a read is the timed-out bit (Gary
+	TCHECK	d0,$7F,4                ; Fig. 6-29), not the mode: none yet
 	move.b	#$00,$DE0300
 	move.b	#$00,$DE7F02            ; COLDBOOT cleared through a far mirror
 	move.b	$DE0002,d0
@@ -290,6 +293,11 @@ start:
 	move.l	$00D00000,d0            ; Gary's DSACK timeout
 	TMARK	2
 	TCHECK	d0,$FFFFFFFF,91
+	moveq	#0,d0
+	move.b	$DE0000,d0              ; the bus timed out
+	TCHECK	d0,$FF,95
+	move.b	$DE0000,d0              ; (reset by the read)
+	TCHECK	d0,$7F,96
 	move.l	#berr,$8.w              ; access error
 	clr.l	flag
 	moveq	#7,d0
@@ -412,6 +420,59 @@ after_berr:
 	move.b	#2,CIAA_PRA             ; OVL off
 	move.l	$0.w,d0                 ; chip RAM back, its contents kept
 	TCHECK	d0,$12345678,112
+
+;--- Gary's decode: the CIAs, $DF0000, the interrupt master, the overlay -----------
+	move.b	#$11,$BFE301            ; CIA-A DDRB
+	move.b	#$22,$BFD300            ; CIA-B DDRB
+	move.b	#$77,$BFC301            ; neither CIA: not both (Gary's timeout)
+	move.b	#$77,$BFC300
+	move.b	#$66,$BF2301            ; no mirror of CIA-A
+	moveq	#0,d0
+	move.b	$BFE301,d0
+	TCHECK	d0,$11,150
+	move.b	$BFD300,d0
+	TCHECK	d0,$22,151
+	clr.b	$BFE301
+	clr.b	$BFD300
+	move.w	#$7FFF,$9A(a1)
+	move.w	#$C028,$9A(a1)          ; INTENA: INTEN | VERTB | PORTS
+	move.w	#$7FFF,$DF009A          ; not a chip register (Gary's timeout)
+	moveq	#0,d0
+	move.w	$1C(a1),d0
+	TCHECK	d0,$4028,152
+	; Gary's interrupt master ($DF809A bit 15): 0 masks every interrupt
+	move.w	#$7FFF,$9A(a1)
+	move.w	#$7FFF,$9C(a1)
+	move.l	#vertb,$6C.w
+	clr.l	flag
+	move.w	#$0000,$DF809A          ; all interrupts off at Gary
+	move.w	#$C020,$9A(a1)          ; INTEN | VERTB at Paula
+	move.w	#$2000,sr
+	bsr	wait_vertb              ; a frame: VERTB raised, not taken
+	bsr	wait_vertb
+	move.w	#$2700,sr
+	move.l	flag,d0
+	TCHECK	d0,0,153
+	move.w	#$8000,$DFB09A          ; on again (any 4 KB of $DF8000-$DFBFFF)
+	move.w	#$2000,sr
+	move.l	#200000,d1
+.gie:	tst.l	flag
+	bne.s	.gieok
+	subq.l	#1,d1
+	bne.s	.gie
+	TFAIL	154
+.gieok:	move.w	#$2700,sr
+	move.w	#$7FFF,$9A(a1)
+	; the overlay is CIA-A PA0 (with DDRA bit 0 an output): set it and the
+	; ROM is at 0 again, for writes too (no stack while it is: $2000 is ROM)
+	move.l	#$12345678,$100.w
+	move.b	#3,CIAA_PRA             ; PA0 high: OVL
+	move.l	$0.w,d2                 ; the ROM's first long word
+	move.l	#$DEADBEEF,$100.w       ; to the ROM: lost
+	move.b	#2,CIAA_PRA             ; OVL off
+	TCHECK	d2,$00002000,155
+	move.l	$100.w,d0
+	TCHECK	d0,$12345678,156
 
 ;--- the HPS share window: the request flag as Main's minimig_share.cpp sees it ---
 	move.l	#$5104A55A,$DD4000      ; a request, as L:MiSTerFileSystem raises one

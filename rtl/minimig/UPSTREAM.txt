@@ -59,4 +59,9 @@ Chip behaviour fixed against the real chips (2026-10-24; tb/asm/t_chipset):
                          other byte as zero); a CLUT word write keeps the
                          addressed entry's other components (it took them
                          from the last write to any entry)
+  paula_audio_channel.v  the length counts at the first DMA word only (state
+                         1), not the second too: the first block after DMA on
+                         was a word short, its interrupt a word early (WinUAE
+                         audio.cpp states 1 and 5)
+  userio.v               POT0DAT compared port 1's stick with port 2's counters
 Not done: Paula's attach modes (ADKCON ATVOL/ATPER), see paula_audio_channel.v.

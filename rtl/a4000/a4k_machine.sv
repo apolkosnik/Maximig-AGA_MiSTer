@@ -210,6 +210,7 @@ wire        sys_rst_n;          // the system reset (the chipset's _cpu_reset)
 wire        cpu_rsto_n;         // the RESET instruction
 wire        iack7_t;            // the card: toggles at a level-7 interrupt acknowledge
 wire  [2:0] cpu_ipl_n;
+wire        gary_ien;           // Gary's interrupt master (a4k_lbus)
 
 // the 68040's bus
 wire [31:0] c_a, c_do, c_di;
@@ -241,7 +242,7 @@ ap68040 #(
 	.rw_n(c_rw_n), .siz(c_siz), .tt(c_tt), .tm(c_tm), .tln(), .upa(),
 	.ciout_n(), .lock_n(), .locke_n(), .ts_n(c_ts_n), .tip_n(),
 	.ta_n(c_ta_n), .tea_n(c_tea_n), .tci_n(c_tci_n), .tbi_n(c_tbi_n),
-	.ipl_n(cpu_ipl_n), .avec_n(c_avec_n),
+	.ipl_n(gary_ien ? cpu_ipl_n : 3'b111), .avec_n(c_avec_n),   // Gary's interrupt master
 	.br_n(), .bg_n(1'b0), .bb_n_i(1'b1), .bb_n_o(), .bb_oe(),
 	.rsto_n(cpu_rsto_n), .cdis_n(1'b1), .mdis_n(1'b1), .ipend_n(), .pst(),
 
@@ -367,6 +368,7 @@ a4k_lbus lbus
 	.rom_speed(2'd1),
 	.ovl(ovl),
 	.extrom_on(extrom_on),
+	.gary_ien(gary_ien),
 	.iack7_t(iack7_t),
 	.dbg_pc(dbg_pc),
 
