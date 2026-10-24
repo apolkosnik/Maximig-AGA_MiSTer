@@ -17,6 +17,7 @@ module denise_colortable
   input  wire           loct,             // 12-bit palette select
   input  wire           ehb_en,           // EHB enable
   input  wire           ehb_bit,          // the half-brite bit: plane 6 before the BPLCON4 XOR
+  input  wire           ehb_pf,           // a playfield pixel: EHB applies (not to sprites, the border)
   output reg  [ 24-1:0] rgb               // RGB output
 );
 
@@ -32,7 +33,7 @@ wire [ 8-1:0] wr_adr = {bank[2:0], reg_address_in[5:1]};
 wire          wr_en  = (reg_address_in[8:6] == COLORBASE[8:6]) && clk7_en && !rdram;
 wire [32-1:0] wr_dat = {4'b0, data_in[11:0], 4'b0, data_in[11:0]};
 wire [ 4-1:0] wr_bs  = loct ? 4'b0011 : 4'b1111;
-wire [ 8-1:0] rd_adr = rdram ? wr_adr : ehb_en ? {3'b000, select_xored[4:0]} : select_xored;
+wire [ 8-1:0] rd_adr = rdram ? wr_adr : (ehb_en && ehb_pf) ? {3'b000, select_xored[4:0]} : select_xored;
 wire [32-1:0] rd_dat;
 reg           ehb_sel;
 
@@ -51,7 +52,7 @@ denise_colortable_ram_mf clut
 
 // register half-brite bit
 always @ (posedge clk) begin
-  ehb_sel <= #1 ehb_bit;
+  ehb_sel <= #1 ehb_bit && ehb_pf;
 end
 
 // pack color values

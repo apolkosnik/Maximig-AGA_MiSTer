@@ -24,4 +24,13 @@ Chip behaviour fixed against the real chips (2026-10-24; tb/asm/t_chipset):
   cia_int.v              IR (ICR bit 7, /IRQ) latches when an enabled interrupt
                          occurs and clears only when ICR is read
   ciaa.v                 port B has its output register (outputs read back)
+  denise_colortable.v    EHB (5-bit index, half-brite) only for playfield pixels:
+                         sprite colours keep their full index (AGA banks)
+  denise_sprites_shifter.v  the fine position (SH1/SH0) delays the output, not
+                         the load, so the first pixel keeps its width; a CPU
+                         write in 32/64-wide modes has no DMA words (dbr):
+                         FMODE bit 2 duplicates it, bit 3 starts with the
+                         previous chip bus word (WinUAE's AGA sprite notes)
+  denise_collision.v     collisions accumulate at every 28 MHz clock (hires and
+                         shres pixels were missed at 7 MHz)
 Not done: Paula's attach modes (ADKCON ATVOL/ATPER), see paula_audio_channel.v.

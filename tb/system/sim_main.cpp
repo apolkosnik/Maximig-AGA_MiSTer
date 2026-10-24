@@ -233,7 +233,8 @@ struct Video {
 		x++;
 	}
 	// the frame's most frequent colour other than black, for t_chipset: at
-	// chip RAM $1F10 its red, $1F12 green and blue, $1F14 $AA55 (done)
+	// chip RAM $1F10 its red, $1F12 green and blue, $1F16 its sample count
+	// (long), $1F14 $AA55 (done)
 	void report_colour()
 	{
 		std::map<uint32_t, int> n;
@@ -249,6 +250,8 @@ struct Video {
 		sdram_scope();
 		sdram_poke16(0x1F10 >> 1, best >> 16);
 		sdram_poke16(0x1F12 >> 1, best & 0xFFFF);
+		sdram_poke16(0x1F16 >> 1, (uint32_t)bn >> 16);   // its sample count
+		sdram_poke16(0x1F18 >> 1, (uint32_t)bn & 0xFFFF);
 		sdram_poke16(0x1F14 >> 1, 0xAA55);
 	}
 	void write()

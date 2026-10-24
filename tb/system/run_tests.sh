@@ -19,7 +19,7 @@ out=$(timeout 1800 ./$OBJ/Vtb_top --rom ../asm/build/t_board.rom --cart ../asm/b
 echo "$out" | grep -v '^\[sim\]'
 if echo "$out" | grep -q '^\[mailbox\].*result 600D'; then echo "t_board  PASS"; else echo "t_board  FAIL"; fail=1; fi
 
-out=$(timeout 1800 ./$OBJ/Vtb_top --rom ../asm/build/t_chipset.rom --ms 600 --quiet 2>&1) || true
+out=$(timeout 1800 ./$OBJ/Vtb_top --rom ../asm/build/t_chipset.rom --ms 1500 --quiet 2>&1) || true
 if echo "$out" | grep -q '^\[mailbox\].*result 600D'; then echo "t_chipset PASS"; else echo "$out" | grep -v '^\[sim\]'; echo "t_chipset FAIL"; fail=1; fi
 
 out=$(timeout 1800 ./$OBJ/Vtb_top --rom ../asm/build/t_hrtmon_mmu.rom --cart ../asm/build/hrtmon_stub.bin --ms 200 --quiet 2>&1) || true

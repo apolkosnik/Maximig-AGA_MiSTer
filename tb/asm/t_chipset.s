@@ -15,6 +15,12 @@
 ;         raises the alarm interrupt
 ;  40-49  CIA-A port B: output bits read back from the output register
 ;  50-59  EHB: the half-brite bit is plane 6 before the BPLCON4 XOR
+;  60-69  sprites (CPU-written, manual mode): EHB leaves their colours alone
+;         (bank 2: entry 33); the fine position (SH1/SH0) moves a pixel
+;         without narrowing it; a CPU write in 32-wide mode (FMODE $0004)
+;         is both halves (the bench's sample counts)
+;  70-79  sprite collisions at the hires and shres pixel rates, at every
+;         fine position
 
 	include	"hw.i"
 
@@ -187,6 +193,111 @@ start:
 	move.b	CIAA+$100,d0
 	TCHECK	d0,$5A,40
 	move.b	#$00,CIAA+$300
+
+;--- sprites ------------------------------------------------------------------------
+	; EHB, all colour 0; sprite 0 from bank 2 (ESPRM 2): its colour 1 is entry 33
+	move.l	#PLANEZ,$E0(a1)
+	move.w	#$2C00,$106(a1)         ; BPLCON3: bank 1 (32-63)
+	move.w	#$0F00,$182(a1)         ; COLOR33 red
+	move.w	#$0C00,$106(a1)
+	move.w	#$00F0,$182(a1)         ; COLOR01 green
+	move.w	#$0021,$10C(a1)         ; BPLCON4: ESPRM 2, OSPRM 1
+	move.w	#$6200,$100(a1)         ; 6 planes: EHB
+	move.w	#$2C48,$140(a1)         ; SPR0POS: H $90
+	clr.w	$142(a1)                ; SPR0CTL
+	clr.w	$146(a1)                ; SPR0DATB
+	move.w	#$FFFF,$144(a1)         ; SPR0DATA: armed, colour 1
+	bsr	frame_colour
+	TCHECK	d0,$00FF0000,60         ; entry 33 (EHB truncated it to 1, halved: green)
+
+	; one lores pixel at each fine position: the same width
+	move.w	#$0011,$10C(a1)
+	move.w	#$0F00,$1A2(a1)         ; COLOR17 red (sprite 0 colour 1, bank 1)
+	move.w	#$1200,$100(a1)         ; 1 plane, zero
+	moveq	#0,d5
+.fp:	move.w	d5,d0
+	lsl.w	#3,d0
+	move.w	d0,$142(a1)             ; SPR0CTL: SH1/SH0
+	clr.w	$146(a1)
+	move.w	#$8000,$144(a1)         ; one pixel
+	bsr	frame_colour
+	TCHECK	d0,$00FF0000,61
+	move.l	$1F16.w,d1              ; its samples
+	tst.w	d5
+	bne.s	.fcmp
+	move.l	d1,d4                   ; position 0: the reference
+	bra.s	.fnx
+.fcmp:	cmp.l	d4,d1
+	beq.s	.fnx
+	PUTHEX	d5
+	PUTHEX	d1
+	PUTHEX	d4
+	TFAIL	62
+.fnx:	addq.w	#1,d5
+	cmp.w	#4,d5
+	bne.w	.fp
+
+	; a CPU write in 32-wide mode: both halves, two pixels
+	move.w	#$0004,$1FC(a1)         ; FMODE: 32-wide sprites
+	clr.w	$142(a1)
+	clr.w	$146(a1)
+	move.w	#$8000,$144(a1)
+	bsr	frame_colour
+	clr.w	$1FC(a1)
+	move.l	$1F16.w,d1
+	move.l	d4,d2
+	add.l	d2,d2                   ; twice the one pixel
+	cmp.l	d2,d1
+	beq.s	.w32
+	PUTHEX	d1
+	PUTHEX	d4
+	TFAIL	64
+.w32:
+
+	; collisions: sprites 0 and 2, one pixel each, overlapping, hires then
+	; shres, at each fine position: CLXDAT bit 9 (sprite 0 to sprite 2)
+	clr.w	$098(a1)                ; CLXCON
+	move.w	#$0C80,d6               ; BPLCON3: SPRES hires
+	moveq	#70,d7                  ; the check's number
+.cres:	move.w	d6,$106(a1)
+	moveq	#0,d5
+.cfp:	move.w	d5,d0
+	lsl.w	#3,d0
+	move.w	d0,$142(a1)
+	move.w	d0,$152(a1)             ; SPR2CTL
+	move.w	#$2C48,$150(a1)         ; SPR2POS: the same place
+	clr.w	$146(a1)
+	clr.w	$156(a1)
+	move.w	#$8000,$144(a1)
+	move.w	#$8000,$154(a1)
+	move.w	$00E(a1),d0             ; CLXDAT: read clears
+	move.w	#$8300,$96(a1)
+	moveq	#1,d2                   ; two frames
+.cv:	move.w	#$0020,$9C(a1)
+.cv2:	btst	#5,$1F(a1)
+	beq.s	.cv2
+	dbra	d2,.cv
+	move.w	#$0100,$96(a1)
+	move.w	$00E(a1),d0
+	btst	#9,d0
+	bne.s	.cok
+	PUTHEX	d6
+	PUTHEX	d5
+	move.l	d7,d0
+	add.l	#$BAD00000,d0
+	move.l	d0,MBOX
+.cdead:	bra.s	.cdead
+.cok:	addq.w	#1,d5
+	cmp.w	#4,d5
+	bne.w	.cfp
+	addq.l	#1,d7
+	cmp.w	#$0CC0,d6
+	beq.s	.cdone
+	move.w	#$0CC0,d6               ; SPRES shres
+	bra.w	.cres
+.cdone:	clr.w	$142(a1)                ; sprites off
+	clr.w	$152(a1)
+	move.w	#$0C00,$106(a1)
 
 	TPRINT	msg_pass
 	TPASS	0

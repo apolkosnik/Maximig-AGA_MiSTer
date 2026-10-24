@@ -101,15 +101,14 @@ always @(posedge clk)
     clxdat_read_del <= clxdat_read;
   end
 
-//register detected collisions
+//register detected collisions: at every 28 MHz clock, the shres pixel rate
+//(sampled at 7 MHz only, hires and shres pixels were missed); cleared after
+//a read, as before
 always @(posedge clk)
-  if (clk7_en) begin
-  //  if (reg_address_in[8:1]==CLXDAT[8:1])    //if clxdat is read, clxdat is cleared to all zero's
-    if (!clxdat_read & clxdat_read_del)  //if clxdat is read, clxdat is cleared to all zero's after read
-      clxdat <= 0;
-    else //else register collisions
-      clxdat <= clxdat[14:0] | cl[14:0];
-  end
+  if (clk7_en && !clxdat_read && clxdat_read_del)
+    clxdat <= 0;
+  else
+    clxdat <= clxdat[14:0] | cl[14:0];
 
 //--------------------------------------------------------------------------------------
 

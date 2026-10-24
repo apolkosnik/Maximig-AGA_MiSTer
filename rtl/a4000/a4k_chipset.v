@@ -447,6 +447,7 @@ denise DENISE1
 	.reg_address_in(reg_address),
 	.data_in(custom_data_in),
 	.chip48(chip48),
+	.dbr(dbr),
 	.data_out(denise_data_out),
 	.blank(~_hsync|vblank),
 	.red(red),

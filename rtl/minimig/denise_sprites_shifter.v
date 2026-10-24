@@ -19,6 +19,7 @@ module denise_sprites_shifter
   input [15:0] fmode,
   input shift,
   input [48-1:0] chip48,
+  input   dbr,               // the chip bus is the DMA's: a data write is sprite DMA
   input   [15:0] data_in,     // bus data in
   output  [1:0] sprdata,      // serialized sprite data out
   output  reg attach        // sprite is attached
@@ -44,17 +45,30 @@ reg    load_del;
 //--------------------------------------------------------------------------------------
 
 reg [15:0] data16;
-always @(posedge clk) if (clk7_en) data16 <= data_in;
+reg        dma16;
+always @(posedge clk) if (clk7_en) begin data16 <= data_in; dma16 <= dbr; end
 
-// switch data according to fmode
+// switch data according to fmode: sprite DMA brings the wide fetch's other
+// words (chip48); a CPU write has only its word (WinUAE, after the AGA
+// notes): 32 wide by FMODE bit 2, both halves the written word; by bit 3
+// (and 64 wide), the first 16 pixels the previous chip bus data, the rest
+// the written word again
 reg  [64-1:0] spr_fmode_dat;
 
 always @ (*) begin
-  case(fmode[3:2])
-    2'b00   : spr_fmode_dat = {data16, 48'h000000000000};
-    2'b11   : spr_fmode_dat = {data16, chip48[47:0]};
-    default : spr_fmode_dat = {data16, chip48[47:32], 32'h00000000};
-  endcase
+  if (dma16)
+    case(fmode[3:2])
+      2'b00   : spr_fmode_dat = {data16, 48'h000000000000};
+      2'b11   : spr_fmode_dat = {data16, chip48[47:0]};
+      default : spr_fmode_dat = {data16, chip48[47:32], 32'h00000000};
+    endcase
+  else
+    case(fmode[3:2])
+      2'b00   : spr_fmode_dat = {data16, 48'h000000000000};
+      2'b01   : spr_fmode_dat = {data16, data16, 32'h00000000};
+      2'b10   : spr_fmode_dat = {chip48[47:32], data16, 32'h00000000};
+      default : spr_fmode_dat = {chip48[47:32], data16, data16, data16};
+    endcase
 end
 
 // generate armed signal
@@ -119,13 +133,12 @@ end
 
 //--------------------------------------------------------------------------------------
 
-reg  [2:0] load_d;
-wire [3:0] load_s = {load_d, clk7_en & load};
-always @(posedge clk) load_d <= load_s[2:0];
-
-// sprite shift register
+// sprite shift register: loaded in step with the pixel clock (the shift
+// enable); AGA's fine position (hstart_lo, 1/4 lores pixel) delays the
+// output below instead, so the first pixel keeps its width
+wire load_s = clk7_en & load;
 always @(posedge clk)
-  if (load_s[hstart_lo]) // AMR - load_del) // load new data into shift register
+  if (load_s) // load new data into shift register
   begin
     shifta[63:0] <= datla[63:0];
     shiftb[63:0] <= datlb[63:0];
@@ -139,11 +152,14 @@ always @(posedge clk)
 // assign serialized output data
 // AMR - register the output data to delay it by one clk7, compensating for removing load_del
 // Fixed highres sprites by pipelining shifter output.
-reg [7:0] sprdata_r;
+reg [13:0] sprdata_r;
 always @(posedge clk)
-  sprdata_r <= {shiftb[63],shifta[63],sprdata_r[7:2]}; // Ugly - are we masking a copper timing problem here?
+  sprdata_r <= {shiftb[63],shifta[63],sprdata_r[13:2]}; // Ugly - are we masking a copper timing problem here?
 
-assign sprdata[1:0] = sprdata_r[1:0]; // {shiftb[63],shifta[63]};
+// 4 clocks behind the shifter (as before), plus the fine position
+assign sprdata[1:0] = hstart_lo == 2'd0 ? sprdata_r[7:6] :
+                      hstart_lo == 2'd1 ? sprdata_r[5:4] :
+                      hstart_lo == 2'd2 ? sprdata_r[3:2] : sprdata_r[1:0];
 //--------------------------------------------------------------------------------------
 
 endmodule

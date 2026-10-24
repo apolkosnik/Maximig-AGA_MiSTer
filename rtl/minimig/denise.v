@@ -43,6 +43,7 @@ module denise (
   input  wire [  9-1:1] reg_address_in, // register adress inputs
   input  wire [ 16-1:0] data_in,        // bus data in
   input  wire [ 48-1:0] chip48,         // big chipram read
+  input  wire           dbr,            // the chip bus is the DMA's
   output wire [ 16-1:0] data_out,       // bus data out
   input  wire           blank,          // blanking input
   output wire [  8-1:0] red,            // red componenent video out
@@ -390,6 +391,7 @@ denise_sprites sprm0
   .hpos(hpos),
   .data_in(data_in),
   .chip48(chip48),
+  .dbr(dbr),
   .sprena(display_ena | brdsprt),
   .esprm(esprm),
   .osprm(osprm),
@@ -427,6 +429,7 @@ denise_colortable clut0
   .loct(loct),
   .ehb_en(ehb_en),
   .ehb_bit(ehb_bit),
+  .ehb_pf(window_ena && !sprsel),
   .rgb(clut_rgb) // rgb data is delayed by one clk28m clock cycle
 );
 
