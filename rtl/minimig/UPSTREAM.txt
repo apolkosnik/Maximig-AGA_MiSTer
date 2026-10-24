@@ -55,4 +55,8 @@ Chip behaviour fixed against the real chips (2026-10-24; tb/asm/t_chipset):
                          (it was only checked when raising one); SRST keeps
                          nIEN and HOB, the write ending SRST sets them; a
                          Command Block write clears HOB (ATA)
+  rtg.v                  byte enables on the registers (a byte write kept the
+                         other byte as zero); a CLUT word write keeps the
+                         addressed entry's other components (it took them
+                         from the last write to any entry)
 Not done: Paula's attach modes (ADKCON ATVOL/ATPER), see paula_audio_channel.v.

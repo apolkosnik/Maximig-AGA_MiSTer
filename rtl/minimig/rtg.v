@@ -41,6 +41,7 @@ module rtg
 	output            ready,
 
 	input      [15:0] data_in,       // bus data in
+	input       [1:0] be,            // byte enables: D15-D8, D7-D0
 	output     [15:0] data_out,      // bus data out
 
 	output reg        ena,
@@ -56,10 +57,16 @@ module rtg
 	output            pal_wr
 );
 
-reg [23:0] rpal;
-
 wire r_en  = aen && (rs[11:4]  == 'h10);
 wire r_pal = aen && (rs[11:10] == 1);
+
+// a register write keeps the bytes it does not enable
+function [15:0] merge;
+	input [15:0] old;
+	begin
+		merge = {be[1] ? data_in[15:8] : old[15:8], be[0] ? data_in[7:0] : old[7:0]};
+	end
+endfunction
 
 // writing of output port
 always @(posedge clk) begin
@@ -67,18 +74,14 @@ always @(posedge clk) begin
 	else if(wr) begin
 		if(r_en) begin
 			case(rs[3:1])
-				0: base[31:16] <= data_in;
-				1: base[15:0]  <= data_in;
-				2: format      <= data_in[4:0];
-				3: ena         <= data_in[0];
-				4: hsize       <= data_in[11:0];
-				5: vsize       <= data_in[11:0];
-				6: stride      <= data_in[13:0];
+				0: base[31:16] <= merge(base[31:16]);
+				1: base[15:0]  <= merge(base[15:0]);
+				2: format      <= merge({11'd0, format}) & 16'h001F;
+				3: ena         <= be[0] ? data_in[0] : ena;
+				4: hsize       <= merge({4'd0, hsize}) & 16'h0FFF;
+				5: vsize       <= merge({4'd0, vsize}) & 16'h0FFF;
+				6: stride      <= merge({2'd0, stride}) & 16'h3FFF;
 			endcase
-		end
-		else if(r_pal) begin
-			if (!rs[1]) rpal[23:16] <= data_in[7:0];
-			       else rpal[15:0]  <= data_in;
 		end
 	end
 end
@@ -105,12 +108,19 @@ reg [2:0] rd_r;
 always @(posedge clk) rd_r <= rd_ready ? 3'd0 : {rd_r[1:0],aen & rd};
 wire rd_ready = r_pal ? rd_r[2] : rd_r[0];
 
+// a CLUT write is a word of the addressed entry (00RR or GGBB): the entry is
+// read first (pal_dr, as for a read) and the other components kept
+reg [2:0] wr_r;
+always @(posedge clk) wr_r <= wr_ready ? 3'd0 : {wr_r[1:0],aen & wr & r_pal};
+wire wr_ready = wr_r[2];
+
 assign pal_clk  = clk;
 assign pal_a    = rs[9:2];
-assign pal_wr   = wr & r_pal;
-assign pal_dw   = rs[1] ? {rpal[23:16],data_in} : {data_in[7:0],rpal[15:0]};
+assign pal_wr   = wr_ready;
+assign pal_dw   = rs[1] ? {pal_dr[23:16], be[1] ? data_in[15:8] : pal_dr[15:8], be[0] ? data_in[7:0] : pal_dr[7:0]}
+                        : {be[0] ? data_in[7:0] : pal_dr[23:16], pal_dr[15:0]};
 
 assign data_out = aen ? dout : 16'h0000;
-assign ready    = aen & (wr | rd_ready);
+assign ready    = aen & ((wr & !r_pal) | wr_ready | rd_ready);
 
 endmodule

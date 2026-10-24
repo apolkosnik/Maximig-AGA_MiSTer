@@ -36,3 +36,5 @@ main_patch/build/
 logs/
 tb/ide/obj_*/
 tb/ide/*.log
+tb/mem/obj_*/
+tb/mem/*.log

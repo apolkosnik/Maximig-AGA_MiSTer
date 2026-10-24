@@ -294,6 +294,7 @@ wire [8:0] rf_ival = (ramsey_cfg[6:5] == 2'd0) ? 9'd154 :
 reg        rtg_cs, rtg_rd, rtg_wr;
 reg [11:1] rtg_rs;
 reg [15:0] rtg_din;
+reg  [1:0] rtg_be;
 wire [15:0] rtg_dout;
 wire        rtg_ready;
 
@@ -307,6 +308,7 @@ rtg rtgregs
 	.rs(rtg_rs),
 	.ready(rtg_ready),
 	.data_in(rtg_din),
+	.be(rtg_be),
 	.data_out(rtg_dout),
 	.ena(rtg_ena),
 	.hsize(rtg_hsize),
@@ -622,6 +624,7 @@ always @(posedge clk) begin
 					rtg_cs  <= 1'b1;
 					rtg_rs  <= {lb_addr[11:2], ~(lb_be[3] | lb_be[2])};
 					rtg_din <= (lb_be[3] | lb_be[2]) ? lb_wdata[31:16] : lb_wdata[15:0];
+					rtg_be  <= (lb_be[3] | lb_be[2]) ? lb_be[3:2] : lb_be[1:0];
 					rtg_rd  <= !lb_we;
 					rtg_wr  <= lb_we;
 					st      <= S_RTG;
@@ -725,8 +728,9 @@ always @(posedge clk) begin
 		end
 
 		S_RTG: if (rtg_ready) begin
-			// rtg.v: a write is taken at once, a read answers a clock (a
-			// register) or three (the CLUT) later
+			// rtg.v: a register write is taken at once, a read answers a
+			// clock (a register) or three (the CLUT) later, as does a CLUT
+			// write (it keeps the entry's other components)
 			rtg_cs <= 1'b0;
 			rtg_rd <= 1'b0;
 			rtg_wr <= 1'b0;
@@ -746,6 +750,7 @@ always @(posedge clk) begin
 			rtg_cs  <= 1'b1;
 			rtg_rs  <= {lb_addr[11:2], 1'b1};
 			rtg_din <= lb_wdata[15:0];
+			rtg_be  <= lb_be[1:0];
 			rtg_rd  <= !lb_we;
 			rtg_wr  <= lb_we;
 			st      <= S_RTG;

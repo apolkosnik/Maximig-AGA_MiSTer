@@ -153,7 +153,7 @@ always @ (posedge sysclk) begin
 	reg  [1:0] cas_dqm;
 	reg [15:0] datawr;
 	reg  [9:0] casaddr;
-	reg  [3:0] rcnt;
+	reg  [4:0] rcnt;
 
 	sd_clk <= sdram_state[0];
 
@@ -212,7 +212,10 @@ always @ (posedge sysclk) begin
 
 				if(~&rcnt) rcnt <= rcnt + 1'd1;
 
-				// the chip bus first (Alice's DMA, the CPU's chip cycles, the HPS)
+				// the chip bus first (Alice's DMA, the CPU's chip cycles, the HPS);
+				// a refresh takes a free slot from 16 slots on, and from 31 goes
+				// before the CPU (a CPU streaming to the motherboard RAM let none
+				// through: 8192 in 64 ms is one in 55 slots, this is one in 32)
 				if(~chipDMA | ~chipRW) begin
 					slot_type    <= CHIP;
 					{sd_ba,sd_addr,casaddr[8:0]} <= chipAddr;
@@ -225,6 +228,12 @@ always @ (posedge sysclk) begin
 					a_rd2        <= chip32 &  chipRW;
 					datawr2      <= chipWR2;
 					dqm2         <= 2'b00;
+				end
+				else if(&rcnt) begin
+					// REFRESH, overdue
+					sd_ras       <= 0;
+					sd_cas       <= 0;
+					rcnt         <= 0;
 				end
 				// the motherboard: ROM and Ramsey's RAM
 				else if(cpu_req != cpu_ack) begin
@@ -239,8 +248,8 @@ always @ (posedge sysclk) begin
 					datawr2      <= cpu_wdata[15:0];
 					dqm2         <= ~cpu_be[1:0];
 				end
-				else if(&rcnt) begin
-					// REFRESH
+				else if(rcnt[4]) begin
+					// REFRESH, in a free slot
 					sd_ras       <= 0;
 					sd_cas       <= 0;
 					rcnt         <= 0;
