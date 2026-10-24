@@ -107,21 +107,21 @@ static void sdram_scope() { svSetScope(svGetScopeFromName("TOP.tb_top.sdram")); 
 static void ddr_scope() { svSetScope(svGetScopeFromName("TOP.tb_top.ddr3")); }
 
 // The HPS share window as Main's minimig_share.cpp sees it (DDR3 0x27FF4000,
-// the ARM's byte order).  At mark 3 t_board has written $AABBCCDD at
-// $DD4000: Minimig's layout has each 16-bit word's bytes swapped, BB AA DD CC.
-// The reply is written the way Main writes it, as native uint16 stores
-// (0x1234 at +4, 0x5678 at +6), for t_board to read back as $12345678.
+// the ARM's byte order).  At mark 3 t_board has written a request flag the
+// way L:MiSTerFileSystem does, $5104A55A at $DD4000.  minimig_share_poll()
+// takes a request when the flag, read as a uint32, has 0x5AA5 in its top
+// half and ((id - 77) & 0xFF) == ((id >> 8) & 0xFF); it acknowledges by
+// storing (uint16_t)id at +2, which t_board reads back as $51045104.
 static bool share_check()
 {
 	const uint32_t w = 0x27FF4000u >> 3;
 	ddr_scope();
 	uint64_t v = ddr_peek64(w);
-	uint32_t got = (uint32_t)v;               // bytes +0..+3
-	uint32_t want = 0xCCDDAABBu;              // BB AA DD CC, little-endian
-	printf("[share] DDR3 0x27FF4000: %02X %02X %02X %02X (want BB AA DD CC)\n",
-	       got & 0xFF, (got >> 8) & 0xFF, (got >> 16) & 0xFF, got >> 24);
-	if (got != want) return false;
-	v = (v & 0xFFFFFFFFull) | ((uint64_t)0x5678 << 48) | ((uint64_t)0x1234 << 32);
+	uint32_t id = (uint32_t)v;
+	bool taken = ((id >> 16) & 0xFFFF) == 0x5AA5 && ((id - 77) & 0xFF) == ((id >> 8) & 0xFF);
+	printf("[share] request flag as Main reads it: %08X (%s)\n", id, taken ? "a request" : "not a request");
+	if (!taken) return false;
+	v = (v & 0xFFFFFFFF0000FFFFull) | ((uint64_t)(id & 0xFFFF) << 16);
 	ddr_poke64(w, v);
 	return true;
 }
@@ -371,7 +371,7 @@ int main(int argc, char **argv)
 					else if (off == 8) { printf("%08X\n", d); fflush(stdout); }
 					else if (off == 12) {
 						printf("[mark] %u at %.6f ms\n", d, sim_ms()); fflush(stdout);
-						if (d == 3 && !share_check()) { printf("[share] FAIL: not Minimig's layout\n"); result = 1; }
+						if (d == 3 && !share_check()) { printf("[share] FAIL: Main would not see the request\n"); result = 1; }
 						if (d == 4) { key_at = halfstep; printf("[hrtmon] the HRTmon key\n"); }
 					}
 				}

@@ -20,8 +20,8 @@
 ;  110-119 the RESET instruction: Paula and CIA-A reset, the overlay back
 ;  130-139 the HRTmon cartridge: the Help key's NMI (CIA-A, level 7) enters
 ;         at $A1000C with the VBR in motherboard RAM (bench: --cart, mark 4)
-;  120-129 the HPS share window ($DD4000): Minimig's byte layout, which Main
-;         reads (the bench checks the DDR3 bytes and replies at mark 3)
+;  120-129 the HPS share window ($DD4000): a request flag Main recognises,
+;         and Main's acknowledge read back (the bench plays Main at mark 3)
 
 	include	"hw.i"
 
@@ -373,20 +373,19 @@ after_berr:
 	move.l	$0.w,d0                 ; chip RAM back, its contents kept
 	TCHECK	d0,$12345678,112
 
-;--- the HPS share window: Minimig's layout, as Main's minimig_share.cpp reads it --
-	clr.l	$DD4004
-	move.l	#$AABBCCDD,$DD4000
+;--- the HPS share window: the request flag as Main's minimig_share.cpp sees it ---
+	move.l	#$5104A55A,$DD4000      ; a request, as L:MiSTerFileSystem raises one
 	move.l	$DD4000,d0              ; (the read follows the posted write)
-	TCHECK	d0,$AABBCCDD,120
-	TMARK	3                       ; the bench checks the bytes as the ARM sees them
-	move.l	$DD4004,d0              ; and replies as Main does: uint16 0x1234, 0x5678
-	TCHECK	d0,$12345678,121
+	TCHECK	d0,$5104A55A,120
+	TMARK	3                       ; the bench: Main takes it and acknowledges
+	move.l	$DD4000,d0              ; the acknowledge: the id in the low word
+	TCHECK	d0,$51045104,121
 	moveq	#0,d0
-	move.w	$DD4006,d0
-	TCHECK	d0,$5678,122
+	move.w	$DD4002,d0
+	TCHECK	d0,$5104,122
 	moveq	#0,d0
-	move.b	$DD4005,d0
-	TCHECK	d0,$34,123
+	move.b	$DD4003,d0
+	TCHECK	d0,$04,123
 
 ;--- the HRTmon cartridge: the key's NMI enters at $A1000C, VBR in fast RAM -------
 	lea	VBR2,a0                 ; a VBR in motherboard RAM (as MuFastZero)
