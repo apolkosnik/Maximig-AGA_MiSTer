@@ -409,7 +409,15 @@ wire beat_new = (lb_req != lb_ack) && st == S_IDLE;
 // at +$104 the level-7 acknowledges and the NMI vectors served (one byte
 // each).  48 samples after an NMI vector the ring stops, so it holds the
 // cartridge's entry; the live PC then goes to +$108 (from the ARM: devmem 0x27FF6000 32 ...; each long word reads byte
-// reversed, as all Amiga data in DDR3 does)
+// reversed, as all Amiga data in DDR3 does).  Only in a debug build (the
+// macro MAXIMIG_PCSAMPLE, e.g. set_global_assignment -name VERILOG_MACRO
+// "MAXIMIG_PCSAMPLE=1"): its DDR3 writes take the bus between the CPU's
+// beats, and a CPU beat drops its count writes rather than wait behind DDR3.
+`ifdef MAXIMIG_PCSAMPLE
+localparam PCS_EN = 1'b1;
+`else
+localparam PCS_EN = 1'b0;
+`endif
 reg [11:0] pcs_tmr = 12'd0;
 reg        pcs_t = 1'b0, pcs_d = 1'b0;
 reg [25:0] pcs_n = 26'd0;
@@ -458,6 +466,12 @@ function automatic [31:0] l_long(input [127:0] l, input [1:0] a32);
 	endcase
 endfunction
 
+// Ramsey starts a refresh on this clock: a beat taken on it sees the refresh
+// (and its page closed), not the state before it
+wire rf_start = ce && rf_busy == 0 && ramsey_cfg[6:5] != 2'd3 && rf_cnt >= rf_ival - 1'd1;
+wire [2:0] rf_busy_eff = rf_start ? 3'd4 : rf_busy;
+wire       page_open_eff = page_open && !rf_start;
+
 always @(posedge clk) begin
 	ac_wr  <= 1'b0;
 
@@ -472,7 +486,7 @@ always @(posedge clk) begin
 			end
 		end
 		else if (ramsey_cfg[6:5] != 2'd3) begin
-			if (rf_cnt >= rf_ival - 1'd1) begin
+			if (rf_start) begin
 				rf_cnt    <= 9'd0;
 				rf_busy   <= 3'd4;
 				page_open <= 1'b0;
@@ -517,7 +531,7 @@ always @(posedge clk) begin
 		end
 	end
 	else case (st)
-		S_IDLE: if (!beat_new && pcs_t != pcs_d && !dd_busy) begin
+		S_IDLE: if (PCS_EN && !beat_new && pcs_t != pcs_d && !dd_busy) begin
 			// a PC sample: the slot (unless the ring has stopped), then the
 			// count and the event counters
 			pcs_d    <= pcs_t;
@@ -566,12 +580,12 @@ always @(posedge clk) begin
 						// Ramsey: wait out a refresh, then the access
 						logic [5:0] acc;
 						if (ramsey_cfg[0]) begin
-							acc = (page_open && page_row == lb_addr[31:11]) ? 6'd3 : 6'd7;
+							acc = (page_open_eff && page_row == lb_addr[31:11]) ? 6'd3 : 6'd7;
 							page_open <= 1'b1;
 							page_row  <= lb_addr[31:11];
 						end
 						else acc = ramsey_cfg[4] ? 6'd4 : 6'd5;
-						need <= fast ? 6'd0 : acc + {3'd0, rf_busy};
+						need <= fast ? 6'd0 : acc + {3'd0, rf_busy_eff};
 					end
 					if (dec == T_ROM && lb_we) begin
 						// the ROM ignores writes
@@ -703,14 +717,16 @@ always @(posedge clk) begin
 			else st <= S_DDR;
 		end
 
-		S_PCN: if (!dd_busy) begin
+		S_PCN: if (lb_req != lb_ack) st <= S_IDLE;   // a CPU beat: not behind DDR3
+		else if (!dd_busy) begin
 			dd_addr  <= {13'h07FF, 8'h61, 6'd0};
 			dd_wdata <= {6'd0, pcs_n};
 			dd_req   <= ~dd_req;
 			st       <= S_PCE;
 		end
 
-		S_PCE: if (!dd_busy) begin
+		S_PCE: if (lb_req != lb_ack) st <= S_IDLE;
+		else if (!dd_busy) begin
 			dd_addr  <= {13'h07FF, 8'h61, 6'd1};
 			dd_wdata <= {8'd0, pcs_ack, 8'd0, pcs_nmi};
 			dd_req   <= ~dd_req;

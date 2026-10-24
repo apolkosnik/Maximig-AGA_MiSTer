@@ -170,8 +170,11 @@ The AP68040's own regression is `rtl/AP68040/tb/run_tests.sh`.
 
 ### On hardware
 
-The core samples the CPU's PC about every 72 µs into a ring of 64 long
-words at DDR3 `0x27FF6000`, which the MiSTer can read with
+A debug build can sample the CPU's PC: add
+`set_global_assignment -name VERILOG_MACRO "MAXIMIG_PCSAMPLE=1"` to
+`Maximig.qsf` (normal builds leave it out: its DDR3 writes share the
+local bus with the CPU). The core then samples the PC about every 72 µs
+into a ring of 64 long words at DDR3 `0x27FF6000`, which the MiSTer can read with
 `devmem 0x27FF6000 32` (each long word reads byte-reversed). Next to it
 are the sample count (`+$100`), and the counts of level-7 interrupt
 acknowledges and HRTmon NMI vectors (`+$104`). After an HRTmon entry the
