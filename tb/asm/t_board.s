@@ -18,6 +18,8 @@
 ;         of the frame (its MOVEs to INTREQ seen by the CPU), the blitter
 ;         (a copy, an inverting blit with an A modulo)
 ;  110-119 the RESET instruction: Paula and CIA-A reset, the overlay back
+;  130-139 the HRTmon cartridge: the Help key's NMI (CIA-A, level 7) enters
+;         at $A1000C with the VBR in motherboard RAM (bench: --cart, mark 4)
 ;  120-129 the HPS share window ($DD4000): Minimig's byte layout, which Main
 ;         reads (the bench checks the DDR3 bytes and replies at mark 3)
 
@@ -386,6 +388,35 @@ after_berr:
 	move.b	$DD4005,d0
 	TCHECK	d0,$34,123
 
+;--- the HRTmon cartridge: the key's NMI enters at $A1000C, VBR in fast RAM -------
+	lea	VBR2,a0                 ; a VBR in motherboard RAM (as MuFastZero)
+	move.w	#255,d0
+.vb:	move.l	#unexpected,(a0)+
+	dbra	d0,.vb
+	move.l	#nmi_own,VBR2+$7C       ; the table's own NMI vector: must not be taken
+	lea	VBR2,a0
+	movec	a0,vbr
+	clr.l	$1F04.w
+	clr.l	$1F08.w
+	move.w	#$0ABC,$180(a1)         ; COLOR00, for the custom register mirror
+	TMARK	4                       ; the bench presses the HRTmon key
+	move.l	#400000,d1
+.nw:	tst.l	$1F04.w
+	bne.s	.nmi
+	subq.l	#1,d1
+	bne.s	.nw
+	TFAIL	130
+.nmi:	move.l	$1F04.w,d0              ; the stub at $A1000C ran
+	TCHECK	d0,$C0DEF00D,131
+	moveq	#0,d0
+	move.w	$1F08.w,d0              ; it read the mirror at $A9F180
+	TCHECK	d0,$0ABC,132
+	moveq	#0,d0
+	move.w	$1F0A.w,d0              ; and the cartridge RAM
+	TCHECK	d0,$5A5A,133
+	moveq	#0,d0
+	movec	d0,vbr
+
 	TPRINT	msg_pass
 	TPASS	0
 
@@ -430,6 +461,9 @@ unexpected:
 	move.w	6(sp),d0                ; format/vector
 	PUTHEX	d0
 	TFAIL	255
+
+nmi_own:
+	TFAIL	134
 
 berr:
 	move.l	#1,flag
@@ -481,3 +515,4 @@ COPL1	equ	$00003000
 COPL2	equ	$00003040
 BLTSRC	equ	$00003100
 BLTDST	equ	$00003200
+VBR2	equ	$07F00000

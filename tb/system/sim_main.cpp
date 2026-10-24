@@ -20,6 +20,8 @@
 //     --customtrace     print writes to DMACON, COP1LC/2LC, COPJMP, BPLCON0, INTENA,
 //                       INTREQ, COLOR00
 //     --dumpchip MS FILE write the 2 MB of chip RAM to FILE at MS milliseconds
+//     --cart FILE       load FILE at $A10000, the cartridge RAM, where Main
+//                       uploads hrtmon.rom (HRTmon is enabled in the config)
 //     --quiet           no progress lines
 //     --vcd FILE        (TRACE=1 builds) write an FST waveform of
 //     --vcd-from MS     ... the window from MS
@@ -28,7 +30,8 @@
 //   A test program reports through the mailbox at $00F00000 (nothing on the
 //   A4000 decodes it, so Gary times the write out; the simulation sees the
 //   beat): +0 result ($600D0000 + n PASS, $BAD00000 + n FAIL: the run ends),
-//   +4 a character, +8 a value printed in hex.
+//   +4 a character, +8 a value printed in hex, +12 a mark (3: the share
+//   window check; 4: the bench presses the HRTmon key, Help, $5F).
 #include "Vtb_top.h"
 #include "Vtb_top__Dpi.h"
 #include "verilated.h"
@@ -138,6 +141,20 @@ static bool load_rom(const char *path)
 	return true;
 }
 
+// the cartridge RAM: $A00000-$A7FFFF is SDRAM 0x680000 (a4k_chipset)
+static bool load_cart(const char *path)
+{
+	FILE *f = fopen(path, "rb");
+	if (!f) { fprintf(stderr, "cannot open %s\n", path); return false; }
+	std::vector<uint8_t> b(0x70000);
+	size_t n = fread(b.data(), 1, b.size(), f);
+	fclose(f);
+	sdram_scope();
+	for (uint32_t i = 0; i < n; i += 2)
+		sdram_poke16((0x690000 + i) >> 1, (b[i] << 8) | (i + 1 < n ? b[i + 1] : 0));
+	return true;
+}
+
 static void dump_chip(const char *path)
 {
 	FILE *f = fopen(path, "wb");
@@ -226,7 +243,7 @@ int main(int argc, char **argv)
 	int speed = 0, mbram = 3, z3 = 0, baud = 9600;
 	bool fast = false, ntsc = false, lbtrace = false, quiet = false, iostat = false, customtrace = false;
 	double lbtrace_from = 0, dump_ms = -1;
-	const char *dump_file = nullptr;
+	const char *dump_file = nullptr, *cart = nullptr;
 	long pctrace = 0;
 	Video video;
 	for (int i = 1; i < argc; i++) {
@@ -249,6 +266,7 @@ int main(int argc, char **argv)
 		else if (a == "--iostat") iostat = true;
 		else if (a == "--customtrace") customtrace = true;
 		else if (a == "--dumpchip") { dump_ms = atof(next()); dump_file = next(); }
+		else if (a == "--cart") cart = next();
 #if VM_TRACE
 		else if (a == "--vcd") {
 			Verilated::traceEverOn(true);
@@ -271,6 +289,7 @@ int main(int argc, char **argv)
 	top->kbd_mouse_data = 0; top->kbd_mouse_type = 0; top->kbd_mouse_level = 0;
 	idle_sys(64);
 	if (!load_rom(rom)) return 2;
+	if (cart && !load_cart(cart)) return 2;
 	top->reset = 0;
 	idle_sys(64);
 
@@ -279,7 +298,7 @@ int main(int argc, char **argv)
 	uio_cmd({0xF1, 0x07});                                      // halt, CPU reset, user reset
 	uio_cmd({0xF3, (uint8_t)(0x10 | (ntsc ? 0x02 : 0x00))});   // chipset: AGA (+NTSC)
 	uio_cmd({0xF4, (uint8_t)((fast ? 0x20 : 0x00) | (speed & 3))});
-	uio_cmd({0xF5, (uint8_t)(0x03 | ((mbram & 3) << 2) | ((z3 & 3) << 4) | ((z3 & 4) ? 0x80 : 0))});
+	uio_cmd({0xF5, (uint8_t)(0x43 | ((mbram & 3) << 2) | ((z3 & 3) << 4) | ((z3 & 4) ? 0x80 : 0))});   // (0x40: HRTmon)
 	uio_cmd({0xF7, 0x00});                                      // floppy: one drive
 	uio_cmd({0xF8, 0x00});                                      // no hard disks
 	uio_cmd({0xF1, 0x03});                                      // release halt, keep reset
@@ -293,6 +312,8 @@ int main(int argc, char **argv)
 	int result = -1;
 	bool halted_reported = false;
 	uint64_t beats = 0, retired = 0;
+	uint64_t key_at = 0;            // the HRTmon key: pressed, then released 0.2 ms later
+	int key_step = 0;
 	bool prev_ce = 0;
 	static const char *rname[] = {"chip","mbram","rom","custom","cia","ide","rtc","gary","acfg","z2io","z3","float","other"};
 	uint64_t rcnt[13] = {0};
@@ -314,6 +335,13 @@ int main(int argc, char **argv)
 
 	while (halfstep < end_half && result < 0) {
 		step_half();
+		// a key as Main sends one: type 2 (keyboard), the code, the level toggled
+		if (key_at && key_step == 0 && halfstep >= key_at) {
+			top->kbd_mouse_type = 2; top->kbd_mouse_data = 0x5F; top->kbd_mouse_level ^= 1; key_step = 1;
+		}
+		else if (key_step == 1 && halfstep >= key_at + (uint64_t)(0.0002 * 2.0 * CLK114_HZ)) {
+			top->kbd_mouse_data = 0xDF; top->kbd_mouse_level ^= 1; key_step = 2;
+		}
 		uint64_t ph = (halfstep - 1) % 8;
 		if (ph == 0) { video.sample(); uart.sample(); }
 		if (ph % 4 == 0) {
@@ -344,6 +372,7 @@ int main(int argc, char **argv)
 					else if (off == 12) {
 						printf("[mark] %u at %.6f ms\n", d, sim_ms()); fflush(stdout);
 						if (d == 3 && !share_check()) { printf("[share] FAIL: not Minimig's layout\n"); result = 1; }
+						if (d == 4) { key_at = halfstep; printf("[hrtmon] the HRTmon key\n"); }
 					}
 				}
 			}

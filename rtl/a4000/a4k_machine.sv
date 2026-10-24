@@ -208,6 +208,8 @@ assign dbg_cpu_ce = cpu_ce;
 
 wire        sys_rst_n;          // the system reset (the chipset's _cpu_reset)
 wire        cpu_rsto_n;         // the RESET instruction
+wire [31:0] cpu_vbr;            // the VBR (the HRTmon cartridge's NMI vector)
+wire        iack7_t;            // the card: toggles at a level-7 interrupt acknowledge
 wire  [2:0] cpu_ipl_n;
 
 // the 68040's bus
@@ -245,7 +247,7 @@ ap68040 #(
 	.rsto_n(cpu_rsto_n), .cdis_n(1'b1), .mdis_n(1'b1), .ipend_n(), .pst(),
 
 	.dbg_pc(dbg_pc), .dbg_retire(dbg_retire), .dbg_halted(dbg_halted),
-	.dbg_vbr(), .dbg_cacr(), .dbg_cmaint(), .dbg_fe(), .dbg_pev()
+	.dbg_vbr(cpu_vbr), .dbg_cacr(), .dbg_cmaint(), .dbg_fe(), .dbg_pev()
 );
 
 wire        lb_req, lb_ack, lb_we, lb_line, lb_berr, lb_ci;
@@ -280,6 +282,7 @@ a4k_a3640 a3640
 	.tci_n(c_tci_n),
 	.tbi_n(c_tbi_n),
 	.avec_n(c_avec_n),
+	.iack7_t(iack7_t),
 
 	.pre(card_pre),
 	.post(card_post),
@@ -363,6 +366,8 @@ a4k_lbus lbus
 	.toccata_fit(1'b1),
 	.rom_speed(2'd1),
 	.ovl(ovl),
+	.iack7_t(iack7_t),
+	.vbr(cpu_vbr),
 
 	.lb_req(lb_req),
 	.lb_ack(lb_ack),
@@ -777,6 +782,7 @@ a4k_chipset chipset
 	._cpu_dtack   (chip_dtack       ),
 	._cpu_reset   (sys_rst_n        ),
 	._cpu_reset_in(cpu_rsto_n       ),
+	.iack7_t      (iack7_t          ),
 
 	.ram_data     (ram_data         ),
 	.ramdata_in   (ramdata_in       ),

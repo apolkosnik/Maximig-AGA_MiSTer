@@ -33,6 +33,7 @@ module a4k_chipset
 	output        _cpu_dtack,
 	output        _cpu_reset,     // to the CPU: the system reset
 	input         _cpu_reset_in,  // from the CPU: RSTO, the RESET instruction
+	input         iack7_t,        // from the card: toggles at a level-7 interrupt acknowledge
 
 	// chip RAM (SDRAM chip port, through a4k_sdram)
 	output [15:0] ram_data,
@@ -178,7 +179,14 @@ wire        sel_cia  = a[23:16] == 8'hBF;
 wire        sel_cia_a = sel_cia & ~a[12];
 wire        sel_cia_b = sel_cia & ~a[13];
 wire        dbs = a[23:21] == 3'b000 || a[23:20] == 4'hC || a[23:16] == 8'hDF;
-wire        ram_sel = dbr | sel_chip | sel_kick | sel_ext;
+// the HRTmon cartridge (Minimig's cart.v): its RAM at $A00000-$A7FFFF (the
+// HPS uploads hrtmon.rom to $A10000 with the CPU halted) and the custom
+// register mirror at $A9F000; the local bus forwards these addresses only
+// once the cartridge is out of stealth (a4k_lbus), so no stealth gate here
+wire        sel_cart = !dbr && a[23:19] == 5'b10100;                  // $A00000-$A7FFFF
+wire        sel_cmirror = !dbr && cpu_rd && a[23:12] == 12'hA9F;       // $A9F000-$A9FFFF
+wire        ram_sel = dbr | sel_chip | sel_kick | sel_ext | sel_cart;
+wire        freeze;                                                    // CIA-A: the HRTmon key
 
 // video
 wire        sol, sof, vbl_int;
@@ -465,8 +473,8 @@ ciaa CIAA1
 	.kbd_mouse_type(kbd_mouse_type),
 	.kms_level(kms_level),
 	.kbd_mouse_data(kbd_mouse_data),
-	.freeze(),
-	.hrtmon_en(1'b0)
+	.freeze(freeze),
+	.hrtmon_en(memory_config[6])
 );
 
 // CIA B
@@ -540,7 +548,27 @@ minimig_m68k_bridge CPU1
 	.host_ack (host_ack)
 );
 
-assign _cpu_ipl = _iplx;
+// the cartridge's NMI: the freeze key (CIA-A, HRTmon enabled) raises level
+// 7 until the card acknowledges it
+reg         freeze_d = 1'b0, int7 = 1'b0;
+reg   [2:0] iack7_s = 3'd0;
+always @(posedge clk) begin
+	iack7_s <= {iack7_s[1:0], iack7_t};
+	if (clk7_en) freeze_d <= freeze;
+	if (reset)                          int7 <= 1'b0;
+	else if (clk7_en && freeze && !freeze_d) int7 <= 1'b1;
+	else if (iack7_s[2] != iack7_s[1])  int7 <= 1'b0;
+end
+
+// the custom registers as last written, for HRTmon to read at $A9F000
+reg  [15:0] cmirror [0:255];
+reg  [15:0] cmirror_q;
+always @(posedge clk) begin
+	if (clk7_en) cmirror[reg_address] <= custom_data_in;
+	cmirror_q <= cmirror[a[8:1]];
+end
+
+assign _cpu_ipl = int7 ? 3'b000 : _iplx;
 
 //--------------------------------------------------------------------------
 // the chip-bus decode (Gary's part of it on this side): chip RAM for DMA
@@ -552,7 +580,7 @@ assign _cpu_ipl = _iplx;
 // bus multiplexers (gary.v)
 assign ram_data_in    = dbr ? custom_data_out : cpu_data_out;
 assign custom_data_in = dbr ? ram_data_out : cpu_rd ? 16'hFFFF : cpu_data_out;
-assign gary_data_out  = dbr ? 16'h0000 : custom_data_out | ram_data_out;
+assign gary_data_out  = dbr ? 16'h0000 : custom_data_out | ram_data_out | (sel_cmirror ? cmirror_q : 16'h0000);
 assign ram_rd         = dbr ? ~dbwe : cpu_rd;
 assign ram_hwr        = dbr ?  dbwe : cpu_hwr;
 assign ram_lwr        = dbr ?  dbwe : cpu_lwr;
@@ -561,6 +589,7 @@ assign ram_lwr        = dbr ?  dbwe : cpu_lwr;
 assign ram_address = dbr      ? {4'b0000, dma_address_out[20:1]} :
                      sel_kick ? {6'b001111, a[18:1]} :
                      sel_ext  ? {6'b001110, a[18:1]} :
+                     sel_cart ? {6'b001101, a[18:1]} :
                                 {4'b0000, a[20:1]};
 
 // the sram bridge's strobes (minimig_sram_bridge)

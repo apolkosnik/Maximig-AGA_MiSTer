@@ -60,6 +60,8 @@ module a4k_lbus
 	input             toccata_fit,
 	input       [1:0] rom_speed,     // ROM jumpers: 5, 6, 7, 8 CPU clocks
 	input             ovl,           // CIA-A OVL: ROM at $000000 for reads
+	input             iack7_t,       // the card: toggles at a level-7 interrupt acknowledge
+	input      [31:0] vbr,           // the CPU's VBR (the NMI vector's address)
 
 	// the card
 	input             lb_req,
@@ -153,7 +155,8 @@ localparam [4:0]
 	T_RTGREG = 5'd17,  // RTG registers and CLUT
 	T_SHARE  = 5'd18,  // DDR3: HPS share window ($DD4000-$DD5FFF)
 	T_CPUSP  = 5'd19,  // CPU space (MOVES with FC 7): bus error
-	T_FLOAT  = 5'd20;  // nothing answers where Gary does not time out: floats
+	T_FLOAT  = 5'd20,  // nothing answers where Gary does not time out: floats
+	T_NMIV   = 5'd21;  // the HRTmon cartridge's NMI vector
 
 // slow bus target numbers (a4k_budgie)
 localparam [2:0] SB_CHIP = 3'd0, SB_CREG = 3'd1, SB_CIA = 3'd2, SB_RTC = 3'd3,
@@ -174,6 +177,15 @@ function automatic bank_fitted(input [1:0] cfg, input [1:0] bank);
 	endcase
 endfunction
 
+// the HRTmon cartridge (Minimig's cart.v, its CPU side): the level-7
+// interrupt acknowledge (the freeze key's NMI) takes the cartridge out of
+// stealth -- its RAM and custom register mirror at $A00000-$AFFFFF answer
+// on the chip bus from then on -- and arms the NMI vector: the next read of
+// VBR + $7C returns $00A1000C, HRTmon's entry, wherever the VBR points
+reg        cart_on = 1'b0;
+reg        nmi_arm = 1'b0;
+wire [31:0] nmi_vec = vbr + 32'h7C;
+
 reg [4:0] dec;
 always @(*) begin
 	logic [31:0] a;
@@ -187,6 +199,7 @@ always @(*) begin
 		casez (a[23:16])
 			8'b000?_????: dec = (ovl && !lb_we && a[23:19] == 5'd0) ? T_ROM : T_CHIP;   // $000000-$1FFFFF
 			8'hBF:        dec = T_CIA;
+			8'hA?:        dec = cart_on ? T_CREG : T_FLOAT;                         // the cartridge
 			8'hC?:        dec = T_CREG;                                              // Fat Gary's mirror
 			8'hDC:        dec = T_RTC;
 			8'hDD:        dec = (a[15:13] == 3'b001) ? T_IDE : (a[15:13] == 3'b010) ? T_SHARE : T_NONE;
@@ -207,6 +220,7 @@ always @(*) begin
 		if (rtgb_ena && a[31:24] == rtgb_base)
 			dec = !a[23] ? T_RTGFB : (a[22:16] == 7'd0) ? T_RTGREG : T_NONE;
 	end
+	if (nmi_arm && !lb_we && lb_addr == nmi_vec[31:2]) dec = T_NMIV;
 end
 
 // cache inhibit (Gary's and the Zorro III boards' CIIN/CINH): everything
@@ -373,6 +387,20 @@ always @(*) begin
 end
 
 wire beat_new = (lb_req != lb_ack) && st == S_IDLE;
+
+reg iack7_d = 1'b0;
+always @(posedge clk) begin
+	iack7_d <= iack7_t;
+	if (reset) begin
+		cart_on <= 1'b0;
+		nmi_arm <= 1'b0;
+	end
+	else if (iack7_t != iack7_d) begin
+		cart_on <= 1'b1;
+		nmi_arm <= 1'b1;
+	end
+	else if (beat_new && dec == T_NMIV) nmi_arm <= 1'b0;
+end
 
 // the ports: a request is outstanding while req differs from ack.  A write
 // is posted (the beat terminates after its region's cycle time while the
@@ -566,6 +594,11 @@ always @(posedge clk) begin
 				T_FLOAT: begin
 					need <= fast ? 6'd0 : CYC_AC;
 					st   <= S_WAIT;
+				end
+				T_NMIV: begin
+					rdata <= 32'h00A1000C;
+					need  <= fast ? 6'd0 : CYC_REG;
+					st    <= S_WAIT;
 				end
 				default: begin
 					// nothing decodes the address: Gary's timeout

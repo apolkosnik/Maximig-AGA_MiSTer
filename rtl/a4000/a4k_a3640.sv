@@ -50,6 +50,7 @@ module a4k_a3640
 	output reg        tci_n,
 	output            tbi_n,
 	output reg        avec_n,
+	output reg        iack7_t = 1'b0, // toggles at each level-7 interrupt acknowledge
 
 	// the card's synchronisation cost per beat, in CPU clocks
 	input       [2:0] pre,
@@ -217,6 +218,9 @@ always @(posedge clk) begin
 				// an interrupt acknowledge: autovectored; a breakpoint: TA
 				ta_n   <= 1'b0;
 				avec_n <= (tm == 3'd0);
+				// the level-7 one (the HRTmon cartridge's NMI): on the 68040 TM
+				// carries the level (0: a breakpoint acknowledge)
+				if (tm == 3'd7) iack7_t <= ~iack7_t;
 				xst    <= X_TA;
 				xline  <= 1'b0;
 				rerr   <= 1'b0;
