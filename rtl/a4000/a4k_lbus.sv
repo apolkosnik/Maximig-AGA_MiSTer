@@ -364,7 +364,8 @@ localparam [5:0] CYC_AC    = 6'd14;   // a configuration-space Zorro II cycle
 // the beat
 //----------------------------------------------------------------------------
 localparam [3:0] S_IDLE = 4'd0, S_PORT = 4'd1, S_RTG = 4'd2, S_RTG2 = 4'd3, S_WAIT = 4'd4, S_TOUT = 4'd5, S_DONE = 4'd6,
-                 S_SDQ = 4'd7, S_SDR = 4'd8, S_DDQ = 4'd9, S_DDR = 4'd10, S_PCN = 4'd11;
+                 S_SDQ = 4'd7, S_SDR = 4'd8, S_DDQ = 4'd9, S_DDR = 4'd10, S_PCN = 4'd11,
+                 S_PCE = 4'd12;
 reg  [3:0] st;
 reg  [5:0] need;        // CPU clocks the beat must take
 reg  [5:0] elapsed;     // CPU clocks since the beat started
@@ -397,17 +398,22 @@ end
 
 wire beat_new = (lb_req != lb_ack) && st == S_IDLE;
 
-// The PC sampler, a debug aid on real hardware: about once a millisecond
-// (2^16 clk_57 cycles) the CPU's PC goes to a ring of 64 long words in DDR3
-// at 0x27FF6000, the sample count to 0x27FF6100, written when the bus is
-// idle (from the ARM: devmem 0x27FF6000 32 ...; each long word reads byte
+// The PC sampler, a debug aid on real hardware: every 2^12 clk_57 cycles
+// (72 us) the CPU's PC goes to a ring of 64 long words in DDR3 at
+// 0x27FF6000, written when the bus is idle; at 0x27FF6100 the sample count,
+// at +$104 the level-7 acknowledges and the NMI vectors served (one byte
+// each).  48 samples after an NMI vector the ring stops, so it holds the
+// cartridge's entry; the live PC then goes to +$108 (from the ARM: devmem 0x27FF6000 32 ...; each long word reads byte
 // reversed, as all Amiga data in DDR3 does)
-reg [15:0] pcs_tmr = 16'd0;
+reg [11:0] pcs_tmr = 12'd0;
 reg        pcs_t = 1'b0, pcs_d = 1'b0;
 reg [25:0] pcs_n = 26'd0;
+reg  [7:0] pcs_ack = 8'd0, pcs_nmi = 8'd0;
+reg  [5:0] pcs_left = 6'd0;
+reg        pcs_stop = 1'b0, pcs_arm = 1'b0;
 always @(posedge clk) begin
 	pcs_tmr <= pcs_tmr + 1'd1;
-	if (pcs_tmr == 16'hFFFF) pcs_t <= ~pcs_t;
+	if (pcs_tmr == 12'hFFF) pcs_t <= ~pcs_t;
 end
 
 reg iack7_d = 1'b0;
@@ -422,6 +428,8 @@ always @(posedge clk) begin
 		nmi_arm <= 1'b1;
 	end
 	else if (beat_new && dec == T_NMIV) nmi_arm <= 1'b0;
+	if (iack7_t != iack7_d) pcs_ack <= pcs_ack + 1'd1;
+	if (beat_new && dec == T_NMIV) pcs_nmi <= pcs_nmi + 1'd1;
 end
 
 // the ports: a request is outstanding while req differs from ack.  A write
@@ -505,14 +513,20 @@ always @(posedge clk) begin
 	end
 	else case (st)
 		S_IDLE: if (!beat_new && pcs_t != pcs_d && !dd_busy) begin
-			// a PC sample: the slot, then the count
+			// a PC sample: the slot (unless the ring has stopped), then the
+			// count and the event counters
 			pcs_d    <= pcs_t;
-			dd_addr  <= {13'h07FF, 8'h60, pcs_n[5:0]};
+			dd_addr  <= pcs_stop ? {13'h07FF, 8'h61, 6'd2} : {13'h07FF, 8'h60, pcs_n[5:0]};
 			dd_we    <= 1'b1;
 			dd_be    <= 4'hF;
-			dd_wdata <= dbg_pc;
+			dd_wdata <= pcs_stop ? dbg_pc : dbg_pc;    // (stopped: the live PC at +$108)
 			dd_req   <= ~dd_req;
-			pcs_n    <= pcs_n + 1'd1;
+			if (!pcs_stop) pcs_n <= pcs_n + 1'd1;
+			if (pcs_nmi != 8'd0 && !pcs_arm) begin pcs_arm <= 1'b1; pcs_left <= 6'd48; end
+			else if (pcs_arm && !pcs_stop) begin
+				pcs_left <= pcs_left - 1'd1;
+				if (pcs_left == 6'd1) pcs_stop <= 1'b1;
+			end
 			st       <= S_PCN;
 		end
 		else if (beat_new) begin
@@ -686,6 +700,13 @@ always @(posedge clk) begin
 		S_PCN: if (!dd_busy) begin
 			dd_addr  <= {13'h07FF, 8'h61, 6'd0};
 			dd_wdata <= {6'd0, pcs_n};
+			dd_req   <= ~dd_req;
+			st       <= S_PCE;
+		end
+
+		S_PCE: if (!dd_busy) begin
+			dd_addr  <= {13'h07FF, 8'h61, 6'd1};
+			dd_wdata <= {8'd0, pcs_ack, 8'd0, pcs_nmi};
 			dd_req   <= ~dd_req;
 			st       <= S_IDLE;
 		end
