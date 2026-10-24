@@ -40,3 +40,5 @@ tb/mem/obj_*/
 tb/mem/*.log
 tb/paula/obj_*/
 tb/paula/*.log
+tb/agnus/obj/
+tb/agnus/*.log

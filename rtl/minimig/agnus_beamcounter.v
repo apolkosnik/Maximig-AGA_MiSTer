@@ -47,6 +47,7 @@ module agnus_beamcounter
 	output reg        hblank,         // video blanking
 	output reg        vblank,         // video blanking
 	output            vbl,            // vertical blanking
+	output            lastline,       // the field's last line (vertical blank starts)
 	output            vblend,         // last line of vertival blanking
 	output            eol,            // end of video line
 	output            eof,            // end of video frame
@@ -259,7 +260,9 @@ assign varbeamen_out = varbeamen;
 reg end_of_line;
 always @(posedge clk) begin
 	if (clk7_en) begin
-		if (hpos[8:0]=={htotal[8:1],1'b0})
+		// NTSC lines alternate 227 and 228 CCKs: LOL is the long one's (WinUAE
+		// maxhpos_short + lol); a programmed line length (VARBEAMEN) is HTOTAL's
+		if (hpos[8:0]=={htotal[8:1] + {7'd0, long_line && !varbeamen},1'b0})
 			end_of_line <= 1'b1;
 		else
 			end_of_line <= 1'b0;
@@ -280,11 +283,14 @@ end
 
 always @(cck) hpos[0] = cck;
 
-//long line signal (not used, only for better NTSC compatibility)
-reg long_line;	 // long line signal for NTSC compatibility (actually long lines are not supported yet)
+//long line signal: NTSC lines alternate 227/228 CCKs (LOL), cleared by a
+//VPOSW write (WinUAE: "LOL is always reset when VPOSW is written to")
+reg long_line;
 always @(posedge clk) begin
 	if (clk7_en) begin
-		if (end_of_line)
+		if (reg_address_in[8:1]==VPOSW[8:1])
+			long_line <= 1'b0;
+		else if (end_of_line)
 			if (pal || (loldis && varbeamen))
 				long_line <= 1'b0;
 			else if (!(loldis && varbeamen))
@@ -364,6 +370,7 @@ assign field1 = (~long_frame) & lace;
 
 //generate end of frame signal
 wire end_of_frame = vpos_inc & last_line;
+assign lastline = last_line;
 
 //external signal assigment
 assign eof = end_of_frame;

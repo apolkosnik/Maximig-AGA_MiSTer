@@ -64,4 +64,11 @@ Chip behaviour fixed against the real chips (2026-10-24; tb/asm/t_chipset):
                          was a word short, its interrupt a word early (WinUAE
                          audio.cpp states 1 and 5)
   userio.v               POT0DAT compared port 1's stick with port 2's counters
+  agnus.v                no sprite DMA while the bitplane sequencer runs (it
+                         was lost only in slots a plane fetched); DMACON bits
+                         12-11 do not exist
+  agnus_beamcounter.v    NTSC long lines (227/228 CCKs with LOL; all were 227);
+                         a VPOSW write clears LOL
+  agnus_bitplanedma.v    the field's last line closes the vertical window (no
+                         bitplane DMA as vertical blank starts)
 Not done: Paula's attach modes (ADKCON ATVOL/ATPER), see paula_audio_channel.v.

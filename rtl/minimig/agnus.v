@@ -125,7 +125,11 @@ wire [8:1] reg_address_cpu = (aen&(rd|hwr|lwr)) ? address_in : 8'hFF;
 
 //--------------------------------------------------------------------------------------
 
-wire dma_spr = req_spr & spren; //sprite dma is using its slot
+wire bpl_run;                   //the bitplane sequencer runs (BPRUN)
+// no sprite DMA while bitplane DMA runs, whatever the planes fetch in the
+// slot (WinUAE generate_sprites: bprun; changelog: "sprites are only
+// inhibited when internal bitplane activity signal is active")
+wire dma_spr = req_spr & spren & ~bpl_run; //sprite dma is using its slot
 wire dma_cop = req_cop & copen; //copper dma is using its slot
 wire dma_blt = req_blt & blten; //blitter dma is using its slot
 
@@ -248,8 +252,9 @@ always @(posedge clk) begin
 		if (reset) dmacon <= 0;
 		else if (reg_address[8:1]==DMACON[8:1])
 		begin
-			if (data_in[15]) dmacon[12:0] <= dmacon[12:0] | data_in[12:0];
-			else             dmacon[12:0] <= dmacon[12:0] & ~data_in[12:0];
+			// bits 12-11 do not exist (read 0: WinUAE dmacon &= 0x07FF)
+			if (data_in[15]) dmacon[12:0] <= dmacon[12:0] | {2'b00, data_in[10:0]};
+			else             dmacon[12:0] <= dmacon[12:0] & ~{2'b00, data_in[10:0]};
 		end
 	end
 end
@@ -358,11 +363,13 @@ agnus_bitplanedma bpd1
 	.ecs(ecs),
 	.a1k(a1k),
 	.sof(sof),
+	.lastline(lastline),
 	.dmaena(bplen),
 	.vpos(vpos),
 	.hpos(hpos),
 	.hde(hde),
 	.dma(dma_bpl),
+	.run(bpl_run),
 	.reg_address_in(reg_address),
 	.reg_address_out(reg_address_bpl),
 	.data_in(data_in),
@@ -466,6 +473,7 @@ agnus_blitter bl1
 wire  [8:0] hpos;      //alternative horizontal beam counter
 wire [10:0] vpos;      //vertical beam counter
 wire        vbl;       //JB: vertical blanking
+wire        lastline;  //the field's last line
 wire        vblend;    //JB: last line of vertical blanking
 wire [15:0] data_bmc;  //beam counter data out
 
@@ -493,6 +501,7 @@ agnus_beamcounter  bc1
 	.hblank(hblank),
 	.vblank(vblank),
 	.vbl(vbl),
+	.lastline(lastline),
 	.vblend(vblend),
 	.eol(sol),
 	.eof(sof),

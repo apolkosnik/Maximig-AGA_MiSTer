@@ -35,11 +35,13 @@ module agnus_bitplanedma (
   input  wire           ecs,              // ddfstrt/ddfstop ECS bits enable
   input  wire           a1k,              // DIP Agnus feature
   input  wire           sof,              // start of frame
+  input  wire           lastline,         // the field's last line
   input  wire           dmaena,           // enable dma input
   input  wire [ 11-1:0] vpos,             // vertical position counter
   input  wire [  9-1:0] hpos,             // agnus internal horizontal position counter (advanced by 4 CCK)
   output reg            hde,              // video data enable (horizontal)
   output wire           dma,              // true if bitplane dma engine uses it's cycle
+  output wire           run,              // the bitplane sequencer runs (BPRUN): no sprite DMA
   input  wire [  9-1:1] reg_address_in,   // register address inputs
   output reg  [  9-1:1] reg_address_out,  // register address outputs
   input  wire [ 16-1:0] data_in,          // bus data in
@@ -92,6 +94,7 @@ reg          ddfena_0;
 
 reg  [ 4: 0] ddfseq;              // bitplane DMA fetch cycle sequencer
 reg          ddfrun;              // set when display dma fetches data
+assign run = ddfrun;
 reg          ddfend;              // indicates the last display data fetch sequence
 
 reg  [ 1: 0] dmaena_delayed;      // delayed bitplane dma enable signal (compatibility)
@@ -204,7 +207,9 @@ end
 // vertical display window enable
 always @ (posedge clk) begin
   if (clk7_en) begin
-    if ((sof && ~a1k) || (vpos[10:0]==0 && a1k) || (vpos[10:0]==vdiwstop[10:0])) // DIP Agnus can't start display DMA at scanline 0
+    // vertical blank's start (the field's last line) closes the window too
+    // (WinUAE forceoff = agnus_bsvb && !harddis_v)
+    if ((sof && ~a1k) || (vpos[10:0]==0 && a1k) || (vpos[10:0]==vdiwstop[10:0]) || (lastline && !harddis)) // DIP Agnus can't start display DMA at scanline 0
       vdiwena <= #1 1'b0;
     else if (vpos[10:0]==vdiwstrt[10:0])
       vdiwena <= #1 1'b1;
