@@ -9,6 +9,7 @@ module denise_hamgenerator
   input  wire           clk7_en,          // 7MHz clock enable
   input  wire [  9-1:1] reg_address_in,   // register adress inputs
   input  wire [ 12-1:0] data_in,          // bus data in
+  input  wire           rdram,            // a COLORxx access reads the palette (AGA): no write
   input  wire [  8-1:0] select,           // colour select input
   input  wire [  8-1:0] bplxor,           // clut address xor value
   input  wire [  3-1:0] bank,             // color bank select
@@ -26,7 +27,7 @@ wire [ 8-1:0] select_xored = select ^ bplxor;
 
 // color ram
 wire [ 8-1:0] wr_adr = {bank[2:0], reg_address_in[5:1]};
-wire          wr_en  = (reg_address_in[8:6] == COLORBASE[8:6]) && clk7_en;
+wire          wr_en  = (reg_address_in[8:6] == COLORBASE[8:6]) && clk7_en && !rdram;
 wire [32-1:0] wr_dat = {4'b0, data_in[11:0], 4'b0, data_in[11:0]};
 wire [ 4-1:0] wr_bs  = loct ? 4'b0011 : 4'b1111;
 wire [ 8-1:0] rd_adr = ham8 ? {2'b00, select_xored[7:2]} : select_xored;

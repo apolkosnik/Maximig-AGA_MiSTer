@@ -36,7 +36,8 @@
 //   A4000 decodes it, so Gary times the write out; the simulation sees the
 //   beat): +0 result ($600D0000 + n PASS, $BAD00000 + n FAIL: the run ends),
 //   +4 a character, +8 a value printed in hex, +12 a mark (3: the share
-//   window check; 4: the bench presses the HRTmon key, Help, $5F).
+//   window check; 4: the bench presses the HRTmon key, Help, $5F; 5: the
+//   next complete frame's dominant colour goes to chip RAM $1F10).
 #include "Vtb_top.h"
 #include "Vtb_top__Dpi.h"
 #include "verilated.h"
@@ -45,6 +46,7 @@
 #include "verilated_fst_c.h"
 #endif
 #include <cstdio>
+#include <map>
 #include <cstdlib>
 #include <cstring>
 #include <cstdint>
@@ -209,12 +211,14 @@ struct Video {
 	static const int W = 2048, H = 700;
 	std::vector<uint8_t> buf = std::vector<uint8_t>(W * H * 3);
 	int sub = 0;
+	int colour_req = 0;   // frames until the dominant-colour report (mark 5)
 
 	void sample()
 	{
 		bool hs = top->hs_n, vs = top->vs_n;
 		if (old_vs && !vs) {
 			if (!dir.empty() && (frame % every) == 0) write();
+			if (colour_req > 0 && --colour_req == 0) report_colour();
 			frame++;
 			y = 0;
 		}
@@ -227,6 +231,25 @@ struct Video {
 			p[0] = top->red; p[1] = top->green; p[2] = top->blue;
 		}
 		x++;
+	}
+	// the frame's most frequent colour other than black, for t_chipset: at
+	// chip RAM $1F10 its red, $1F12 green and blue, $1F14 $AA55 (done)
+	void report_colour()
+	{
+		std::map<uint32_t, int> n;
+		for (int yy = 0; yy < H; yy++)
+			for (int xx = 0; xx < maxx && xx < W; xx++) {
+				uint8_t *p = &buf[(yy * W + xx) * 3];
+				uint32_t c = (p[0] << 16) | (p[1] << 8) | p[2];
+				if (c) n[c]++;
+			}
+		uint32_t best = 0; int bn = 0;
+		for (auto &kv : n) if (kv.second > bn) { bn = kv.second; best = kv.first; }
+		printf("[video] dominant colour %06X (%d samples)\n", best, bn);
+		sdram_scope();
+		sdram_poke16(0x1F10 >> 1, best >> 16);
+		sdram_poke16(0x1F12 >> 1, best & 0xFFFF);
+		sdram_poke16(0x1F14 >> 1, 0xAA55);
 	}
 	void write()
 	{
@@ -424,6 +447,7 @@ int main(int argc, char **argv)
 						printf("[mark] %u at %.6f ms\n", d, sim_ms()); fflush(stdout);
 						if (d == 3 && !share_check()) { printf("[share] FAIL: Main would not see the request\n"); result = 1; }
 						if (d == 4) { key_at = halfstep; printf("[hrtmon] the HRTmon key\n"); }
+						if (d == 5) video.colour_req = 2;   // the next complete frame
 					}
 				}
 			}

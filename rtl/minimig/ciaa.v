@@ -312,6 +312,7 @@ assign porta_out[3:0] = {(~ddrporta[7:6] | regporta[3:2]), (~ddrporta[1:0] | reg
 // Port B - Parallel port (simplified, mostly unused in Amiga)
 //----------------------------------------------------------------------------------
 reg [7:0] ddrportb;         // Port B direction register
+reg [7:0] regportb;         // Port B output register
 
 // Port B direction register
 always @(posedge clk)
@@ -322,11 +323,21 @@ always @(posedge clk)
       ddrportb[7:0] <= (data_in[7:0]);
   end
 
+// Port B output register (8520: its outputs read back from the register,
+// its inputs from the pins)
+always @(posedge clk)
+  if (clk7_en) begin
+    if (reset)
+      regportb[7:0] <= 8'd0;
+    else if (wr && prb)
+      regportb[7:0] <= data_in[7:0];
+  end
+
 // Port B read multiplexer
 always @(*)
 begin
   if (!wr && prb)
-    pb_out[7:0] = portb_in[7:0];    // Read port pins
+    pb_out[7:0] = (regportb[7:0] & ddrportb[7:0]) | (portb_in[7:0] & ~ddrportb[7:0]);
   else if (!wr && ddrb)
     pb_out[7:0] = (ddrportb[7:0]);  // Read direction register
   else

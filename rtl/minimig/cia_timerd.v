@@ -43,8 +43,8 @@ always @(posedge clk)
       latch_ena <= 1'd1;  // Latch enabled after reset
     else if (!wr)
     begin
-      if (thi && !crb7)    // if MSB read and ALARM is not selected, hold data for subsequent reads
-        latch_ena <= 1'd0; // Freeze latch to ensure consistent read
+      if (thi)             // MSB read: hold data for subsequent reads (reads are TOD
+        latch_ena <= 1'd0; // whatever CRB7 selects for writing: 8520)
       else if (tlo)        // if LSB read, update data every clock
         latch_ena <= 1'd1; // Release latch for updates
     end
@@ -106,8 +106,8 @@ always @(posedge clk)
     begin
       tod[23:0] <= 24'd0;  // Clear counter on reset
     end
-    else if (wr && !crb7)  // CRB7==0 enables writing to TOD counter
-    begin
+    else if (wr && !crb7 && (tlo || tme || thi))  // a TOD write (CRB7==0); another
+    begin                                       // register's write leaves the count alone
       if (tlo)
         tod[7:0] <= data_in[7:0];
       if (tme)

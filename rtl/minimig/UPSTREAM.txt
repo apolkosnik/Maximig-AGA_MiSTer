@@ -9,3 +9,14 @@ Verilator lost the copper's pointer reload to it):
   MiSTerFloppyFifo.v  out
   paula_floppy.v      virtualFloppyFifoReset
   userio.v            joy1enable, floppy_ext_drive, user_port_mode
+
+Chip behaviour fixed against the real chips (2026-10-24; tb/asm/t_chipset):
+  denise_hamgenerator.v  the HAM palette copy ignores COLORxx accesses with
+                         BPLCON2 RDRAM (AGA palette reads), as the main one does
+  cia_timerd.v           only a TOD register write suspends the count (a write
+                         to another register lost a tick or its carry); the
+                         high byte's read latch also with CRB7 (ALARM) set
+  cia_int.v              IR (ICR bit 7, /IRQ) latches when an enabled interrupt
+                         occurs and clears only when ICR is read
+  ciaa.v                 port B has its output register (outputs read back)
+Not done: Paula's attach modes (ADKCON ATVOL/ATPER), see paula_audio_channel.v.

@@ -31,6 +31,8 @@ module cia_int
 // Bit 0: TA - Timer A interrupt occurred/enabled
 reg  [4:0] icr = 5'd0;      // Interrupt status register (latched interrupt flags)
 reg  [4:0] icrmask = 5'd0;  // Interrupt mask register (which interrupts are enabled)
+reg        ir = 1'b0;       // IR: an enabled interrupt has occurred; cleared by reading ICR
+                            // only (clearing its mask bit afterwards does not withdraw it)
 
 // Reading ICR returns interrupt status
 // Bit 7 shows if any enabled interrupt is pending (irq signal state)
@@ -83,13 +85,20 @@ always @(posedge clk)
   end
 
 // Generate IRQ output
-// IRQ is asserted when any enabled interrupt flag is set
-// This is a combinational output for immediate interrupt response
-assign irq   = (icrmask[0] & icr[0])    // Timer A interrupt enabled and pending
-      | (icrmask[1] & icr[1])          // Timer B interrupt enabled and pending
-      | (icrmask[2] & icr[2])          // Alarm interrupt enabled and pending
-      | (icrmask[3] & icr[3])          // Serial interrupt enabled and pending
-      | (icrmask[4] & icr[4]);         // FLAG interrupt enabled and pending
+// IRQ is asserted when an enabled interrupt flag is set (at once) and stays
+// asserted, with ICR bit 7, until ICR is read (8520; WinUAE's ICR handling)
+wire   pend  = |(icrmask[4:0] & icr[4:0]);
+assign irq   = ir | pend;
+
+always @(posedge clk)
+  if (clk7_en) begin
+    if (reset)
+      ir <= 1'b0;
+    else if (icrs && !wr)   // reading ICR clears it (new events are latched in icr)
+      ir <= 1'b0;
+    else if (pend)
+      ir <= 1'b1;
+  end
 
 
 endmodule

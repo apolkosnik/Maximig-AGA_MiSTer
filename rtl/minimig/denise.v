@@ -438,6 +438,7 @@ denise_hamgenerator ham0
   .clk7_en(clk7_en),
   .reg_address_in(reg_address_in),
   .data_in(data_in[11:0]),
+  .rdram(rdram),
   .select(bpldata),
   .bplxor(bplxor),
   .bank(bank),
