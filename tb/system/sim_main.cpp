@@ -22,6 +22,7 @@
 //     --dumpchip MS FILE write the 2 MB of chip RAM to FILE at MS milliseconds
 //     --cart FILE       upload FILE at $A10000 through Main's UIO_MM2_WR
 //                       protocol (HRTmon is enabled in the config)
+//     --ddrpeek ADDR    at the end, print the long word at DDR3 physical ADDR
 //     --cart-config     after --cart, write HRTmon's configuration as Main does
 //     --freeze-ms N     press F11 after N simulated milliseconds of running
 //     --quiet           no progress lines
@@ -251,6 +252,7 @@ int main(int argc, char **argv)
 	double lbtrace_from = 0, dump_ms = -1, freeze_ms = -1;
 	const char *dump_file = nullptr, *cart = nullptr;
 	bool cart_config = false;
+	std::vector<uint32_t> ddrpeek;
 	long pctrace = 0;
 	Video video;
 	for (int i = 1; i < argc; i++) {
@@ -275,6 +277,7 @@ int main(int argc, char **argv)
 		else if (a == "--dumpchip") { dump_ms = atof(next()); dump_file = next(); }
 		else if (a == "--cart") cart = next();
 		else if (a == "--cart-config") cart_config = true;
+		else if (a == "--ddrpeek") ddrpeek.push_back((uint32_t)strtoul(next(), nullptr, 0));
 		else if (a == "--freeze-ms") freeze_ms = atof(next());
 #if VM_TRACE
 		else if (a == "--vcd") {
@@ -425,6 +428,11 @@ int main(int argc, char **argv)
 		}
 	}
 	if (!uart.line.empty()) printf("[serial] %s\n", uart.line.c_str());
+	for (uint32_t a : ddrpeek) {
+		ddr_scope();
+		uint64_t v = ddr_peek64(a >> 3);
+		printf("[ddr] %08X: %08X (as the ARM reads it)\n", a, (uint32_t)(v >> ((a & 4) ? 32 : 0)));
+	}
 	printf("[sim] end at %.3f ms, PC %08X, %lu beats, %lu retired, %d frames (%d written)\n", sim_ms(), top->dbg_pc,
 	       (unsigned long)beats, (unsigned long)retired, video.frame, video.written);
 	top->final();

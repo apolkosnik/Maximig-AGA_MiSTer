@@ -61,6 +61,7 @@ module a4k_lbus
 	input       [1:0] rom_speed,     // ROM jumpers: 5, 6, 7, 8 CPU clocks
 	input             ovl,           // CIA-A OVL: ROM at $000000 for reads
 	input             iack7_t,       // the card: toggles at a level-7 interrupt acknowledge
+	input      [31:0] dbg_pc,        // the CPU's PC, for the PC sampler
 
 	// the card
 	input             lb_req,
@@ -363,7 +364,7 @@ localparam [5:0] CYC_AC    = 6'd14;   // a configuration-space Zorro II cycle
 // the beat
 //----------------------------------------------------------------------------
 localparam [3:0] S_IDLE = 4'd0, S_PORT = 4'd1, S_RTG = 4'd2, S_RTG2 = 4'd3, S_WAIT = 4'd4, S_TOUT = 4'd5, S_DONE = 4'd6,
-                 S_SDQ = 4'd7, S_SDR = 4'd8, S_DDQ = 4'd9, S_DDR = 4'd10;
+                 S_SDQ = 4'd7, S_SDR = 4'd8, S_DDQ = 4'd9, S_DDR = 4'd10, S_PCN = 4'd11;
 reg  [3:0] st;
 reg  [5:0] need;        // CPU clocks the beat must take
 reg  [5:0] elapsed;     // CPU clocks since the beat started
@@ -395,6 +396,19 @@ always @(*) begin
 end
 
 wire beat_new = (lb_req != lb_ack) && st == S_IDLE;
+
+// The PC sampler, a debug aid on real hardware: about once a millisecond
+// (2^16 clk_57 cycles) the CPU's PC goes to a ring of 64 long words in DDR3
+// at 0x27FF6000, the sample count to 0x27FF6100, written when the bus is
+// idle (from the ARM: devmem 0x27FF6000 32 ...; each long word reads byte
+// reversed, as all Amiga data in DDR3 does)
+reg [15:0] pcs_tmr = 16'd0;
+reg        pcs_t = 1'b0, pcs_d = 1'b0;
+reg [25:0] pcs_n = 26'd0;
+always @(posedge clk) begin
+	pcs_tmr <= pcs_tmr + 1'd1;
+	if (pcs_tmr == 16'hFFFF) pcs_t <= ~pcs_t;
+end
 
 reg iack7_d = 1'b0;
 always @(posedge clk) begin
@@ -490,7 +504,18 @@ always @(posedge clk) begin
 		end
 	end
 	else case (st)
-		S_IDLE: if (beat_new) begin
+		S_IDLE: if (!beat_new && pcs_t != pcs_d && !dd_busy) begin
+			// a PC sample: the slot, then the count
+			pcs_d    <= pcs_t;
+			dd_addr  <= {13'h07FF, 8'h60, pcs_n[5:0]};
+			dd_we    <= 1'b1;
+			dd_be    <= 4'hF;
+			dd_wdata <= dbg_pc;
+			dd_req   <= ~dd_req;
+			pcs_n    <= pcs_n + 1'd1;
+			st       <= S_PCN;
+		end
+		else if (beat_new) begin
 			dbg_tgt <= dec;
 			elapsed <= 6'd0;
 			berr    <= 1'b0;
@@ -656,6 +681,13 @@ always @(posedge clk) begin
 				st <= S_WAIT;
 			end
 			else st <= S_DDR;
+		end
+
+		S_PCN: if (!dd_busy) begin
+			dd_addr  <= {13'h07FF, 8'h61, 6'd0};
+			dd_wdata <= {6'd0, pcs_n};
+			dd_req   <= ~dd_req;
+			st       <= S_IDLE;
 		end
 
 		S_DDR: if (!dd_busy) begin

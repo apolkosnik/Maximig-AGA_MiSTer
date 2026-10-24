@@ -366,6 +366,7 @@ a4k_lbus lbus
 	.rom_speed(2'd1),
 	.ovl(ovl),
 	.iack7_t(iack7_t),
+	.dbg_pc(dbg_pc),
 
 	.lb_req(lb_req),
 	.lb_ack(lb_ack),
