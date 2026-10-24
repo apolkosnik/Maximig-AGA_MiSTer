@@ -43,8 +43,8 @@ always @(posedge clk)
       latch_ena <= 1'd1;  // Latch enabled after reset
     else if (!wr)
     begin
-      if (thi)             // MSB read: hold data for subsequent reads (reads are TOD
-        latch_ena <= 1'd0; // whatever CRB7 selects for writing: 8520)
+      if (thi && !crb7)    // if MSB read and ALARM is not selected, hold data for subsequent reads
+        latch_ena <= 1'd0; // (8520: no latching with ALARM set, WinUAE cia.cpp)
       else if (tlo)        // if LSB read, update data every clock
         latch_ena <= 1'd1; // Release latch for updates
     end
@@ -163,8 +163,15 @@ always @(posedge clk)
     count_del2 <= count_del & count_ena;
   end
 
+// a TOD write that lands on the alarm value requests the interrupt too:
+// the low byte's (it restarts the count), as WinUAE's cia_checkalarm() on it
+reg wrlo_del;
+always @(posedge clk)
+  if (clk7_en)
+    wrlo_del <= wr && tlo && !crb7;
+
 // alarm interrupt request
-assign irq = (tod[23:0]==alarm[23:0] && (count_del || count_del2)) ? 1'b1 : 1'b0;
+assign irq = (tod[23:0]==alarm[23:0] && (count_del || count_del2 || wrlo_del)) ? 1'b1 : 1'b0;
 
 
 endmodule

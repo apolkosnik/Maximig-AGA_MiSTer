@@ -1,16 +1,20 @@
 ; t_chipset: chip behaviour the board test does not reach, on the real
 ; machine (tb/system).
 ;
-;  1-9    the HAM palette: an AGA palette read (BPLCON2 RDRAM) must not
-;         write it; a HAM6 screen showing palette entry 1, red, stays red
+;  1-9    HAM6: an AGA palette read (BPLCON2 RDRAM) must not write the HAM
+;         palette (entry 1 stays red); with the BPLCON4 XOR a modify takes its
+;         value from the pixel before the XOR, and a set selects from the 16
+;         entries of HAM6 (WinUAE decode_ham_pixel_aga_fast)
 ;         (bench: mark 5 reports the frame's dominant colour at $1F10)
 ;  10-19  CIA-B TOD: writes to another register of the CIA around the
 ;         ticks do not lose the count or the carry ($000FFF + 1 = $001000)
 ;  20-29  CIA-A ICR: an interrupt that has occurred stays pending (IR) when
 ;         its mask bit is cleared, until ICR is read
-;  30-39  CIA-A TOD: reading the high byte latches the count for the low
-;         byte with CRB7 (ALARM) set too
+;  30-39  CIA-A TOD: with CRB7 (ALARM) set reading the high byte does not
+;         latch (8520, WinUAE); a TOD write landing on the alarm value
+;         raises the alarm interrupt
 ;  40-49  CIA-A port B: output bits read back from the output register
+;  50-59  EHB: the half-brite bit is plane 6 before the BPLCON4 XOR
 
 	include	"hw.i"
 
@@ -66,21 +70,34 @@ start:
 	clr.w	$104(a1)                ; RDRAM off
 	and.l	#$0FFF,d0
 	TCHECK	d0,$0F00,1              ; the read gives the palette's red
-	move.w	#$8300,$96(a1)          ; DMAEN | BPLEN
-	clr.w	$1F14.w
-	TMARK	5                       ; the bench: the next frame's colour
-	move.l	#400000,d1
-.cw:	cmp.w	#$AA55,$1F14.w
-	beq.s	.cgot
-	subq.l	#1,d1
-	bne.s	.cw
-	TFAIL	2
-.cgot:	move.w	#$7FFF,$96(a1)
-	moveq	#0,d0
-	move.w	$1F10.w,d0
-	swap	d0
-	move.w	$1F12.w,d0
+	bsr	frame_colour
 	TCHECK	d0,$00FF0000,3          ; HAM entry 1 is still red (not the read's $FFFF)
+
+	; the XOR (BPLCON4 BPLAM $0F) and a modify: pixels $11 (planes 1, 5):
+	; control 01 (blue) after the XOR, the value 1 from the pixel itself
+	move.l	#PLANE1,$F0(a1)         ; plane 5: ones
+	move.w	#$0F11,$10C(a1)
+	bsr	frame_colour
+	TCHECK	d0,$00000011,4          ; blue $11 (the XOR'd value would be $EE)
+	move.l	#PLANEZ,$F0(a1)
+	; the XOR ($40) and a set: pixels $01, $41 after the XOR: HAM6 sets from
+	; entry 1 (red), not 65 (green)
+	move.w	#$4C00,$106(a1)         ; BPLCON3: bank 2 (64-95)
+	move.w	#$00F0,$182(a1)         ; COLOR65 green
+	move.w	#$0C00,$106(a1)
+	move.w	#$4011,$10C(a1)
+	bsr	frame_colour
+	TCHECK	d0,$00FF0000,5
+	move.w	#$0011,$10C(a1)
+
+	; EHB: 6 planes, no HAM, pixels $01, the XOR $20: entry 1 (red) at full
+	; brightness, the half-brite bit being plane 6 as fetched (0)
+	move.w	#$6200,$100(a1)
+	move.w	#$2011,$10C(a1)
+	bsr	frame_colour
+	TCHECK	d0,$00FF0000,50         ; (a half-brite $770000 if taken after the XOR)
+	move.w	#$0011,$10C(a1)
+	move.w	#$0200,$100(a1)
 
 ;--- CIA-B TOD: writes elsewhere in the CIA around the ticks ---------------------
 	move.b	#$00,CIAB+$F00          ; CRB: TOD writes, timer B stopped
@@ -139,14 +156,29 @@ start:
 	moveq	#0,d0
 	move.b	CIAA+$900,d0
 	lsl.w	#8,d0
-	move.b	CIAA+$800,d0            ; lo: the latched count, not three frames on
-	cmp.w	#$0123,d0
-	beq.s	.lok
-	cmp.w	#$0124,d0               ; (a tick between the write and the latch)
-	beq.s	.lok
+	move.b	CIAA+$800,d0            ; lo: the live count, two or three ticks on
+	cmp.w	#$0124,d0               ; (a latch would still read $0123 or $0124)
+	bhi.s	.lok
 	PUTHEX	d0
 	TFAIL	30
 .lok:	move.b	#$00,CIAA+$F00
+
+	; a TOD write landing on the alarm: the alarm interrupt
+	move.b	#$7F,CIAA+$D00          ; masks off
+	move.b	#$80,CIAA+$F00          ; CRB7: ALARM writes
+	move.b	#$00,CIAA+$A00
+	move.b	#$00,CIAA+$900
+	move.b	#$05,CIAA+$800          ; alarm $000005
+	move.b	#$00,CIAA+$F00          ; TOD writes
+	move.b	CIAA+$D00,d0            ; clear what is pending
+	move.b	#$84,CIAA+$D00          ; mask: ALRM
+	move.b	#$00,CIAA+$A00
+	move.b	#$00,CIAA+$900
+	move.b	#$05,CIAA+$800          ; TOD $000005: the alarm, by the write
+	moveq	#0,d0
+	move.b	CIAA+$D00,d0
+	TCHECK	d0,$84,35
+	move.b	#$7F,CIAA+$D00
 
 ;--- CIA-A port B: the output register ------------------------------------------
 	move.b	#$FF,CIAA+$300          ; DDRB: all outputs
@@ -158,6 +190,25 @@ start:
 
 	TPRINT	msg_pass
 	TPASS	0
+
+; the bench's dominant colour of the next complete frame (bitplane DMA on
+; for it), in d0 as $00RRGGBB; fails 2 without an answer
+frame_colour:
+	move.w	#$8300,$96(a1)          ; DMAEN | BPLEN
+	clr.w	$1F14.w
+	TMARK	5
+	move.l	#400000,d1
+.cw:	cmp.w	#$AA55,$1F14.w
+	beq.s	.cgot
+	subq.l	#1,d1
+	bne.s	.cw
+	TFAIL	2
+.cgot:	move.w	#$0100,$96(a1)          ; BPLEN off
+	moveq	#0,d0
+	move.w	$1F10.w,d0
+	swap	d0
+	move.w	$1F12.w,d0
+	rts
 
 print_str:
 	moveq	#0,d0

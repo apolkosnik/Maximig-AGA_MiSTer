@@ -12,10 +12,15 @@ Verilator lost the copper's pointer reload to it):
 
 Chip behaviour fixed against the real chips (2026-10-24; tb/asm/t_chipset):
   denise_hamgenerator.v  the HAM palette copy ignores COLORxx accesses with
-                         BPLCON2 RDRAM (AGA palette reads), as the main one does
+                         BPLCON2 RDRAM (AGA palette reads), as the main one does; with the
+                         BPLCON4 XOR a modify's value is the pixel before the
+                         XOR, and HAM6 sets from its 16 entries only
+  denise.v, denise_colortable.v  EHB's half-brite bit is plane 6 before the
+                         BPLCON4 XOR (WinUAE)
   cia_timerd.v           only a TOD register write suspends the count (a write
-                         to another register lost a tick or its carry); the
-                         high byte's read latch also with CRB7 (ALARM) set
+                         to another register lost a tick or its carry); a TOD
+                         write landing on the alarm raises the alarm interrupt
+                         (no read latch with CRB7 set, as before: 8520)
   cia_int.v              IR (ICR bit 7, /IRQ) latches when an enabled interrupt
                          occurs and clears only when ICR is read
   ciaa.v                 port B has its output register (outputs read back)

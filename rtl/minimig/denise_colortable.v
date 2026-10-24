@@ -16,6 +16,7 @@ module denise_colortable
   input  wire [  3-1:0] bank,             // color bank select
   input  wire           loct,             // 12-bit palette select
   input  wire           ehb_en,           // EHB enable
+  input  wire           ehb_bit,          // the half-brite bit: plane 6 before the BPLCON4 XOR
   output reg  [ 24-1:0] rgb               // RGB output
 );
 
@@ -50,7 +51,7 @@ denise_colortable_ram_mf clut
 
 // register half-brite bit
 always @ (posedge clk) begin
-  ehb_sel <= #1 select_xored[5];
+  ehb_sel <= #1 ehb_bit;
 end
 
 // pack color values

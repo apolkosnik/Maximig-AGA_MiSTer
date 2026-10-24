@@ -82,6 +82,7 @@ wire  [8:1] bpldata_out;    // bitplane serial data out from shifters
 wire  [8:1] bpldata;      // raw bitplane serial video data
 wire  [7:0] sprdata;      // sprite serial video data
 wire  [7:0] plfdata;      // playfield serial video data
+wire        ehb_bit;      // EHB's half-brite bit (before the BPLCON4 XOR)
 wire  [2:1] nplayfield;    // playfield 1,2 valid data signals
 wire  [7:0] nsprite;      // sprite 0-7 valid data signals
 wire  sprsel;          // sprite select
@@ -425,6 +426,7 @@ denise_colortable clut0
   .bank(bank),
   .loct(loct),
   .ehb_en(ehb_en),
+  .ehb_bit(ehb_bit),
   .rgb(clut_rgb) // rgb data is delayed by one clk28m clock cycle
 );
 
@@ -462,6 +464,10 @@ denise_collision col0
   .nsprite(nsprite)
 );
 
+
+// EHB's half-brite bit is plane 6 as fetched, not after the BPLCON4 XOR
+// (WinUAE); sprites and the border keep their colour index's bit 5
+assign ehb_bit = (!window_ena || sprsel) ? clut_data[5] : plfdata[5];
 
 always @(*) begin
   if (brdsprt && sprsel) // select border sprites
