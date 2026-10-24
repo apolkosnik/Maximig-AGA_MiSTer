@@ -72,6 +72,7 @@ module agnus
 	output        bitplane_fetch_unit_start,
 	output reg    cpu_custom,      // CPU has access to custom chipset (registers and chipRAM / slowRAM)
 	output reg    dbr,             // agnus requests data bus
+	output        dmald,           // the bus is bitplane or sprite DMA's: a BPLxDAT/SPRxDATx write is a DMA load (not the copper's or the CPU's)
 	output reg    dbwe,            // agnus does a memory write cycle (only disk and blitter dma channels may do this)
 	output        _hsync,          // horizontal sync
 	output        _vsync,          // vertical sync
@@ -227,6 +228,8 @@ begin
 		dbwe = 0;
 	end
 end
+
+assign dmald = !dma_dsk && !dma_ref && !dma_aud && (dma_bpl || dma_spr);
 
 //--------------------------------------------------------------------------------------
 

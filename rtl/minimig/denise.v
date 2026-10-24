@@ -43,7 +43,7 @@ module denise (
   input  wire [  9-1:1] reg_address_in, // register adress inputs
   input  wire [ 16-1:0] data_in,        // bus data in
   input  wire [ 48-1:0] chip48,         // big chipram read
-  input  wire           dbr,            // the chip bus is the DMA's
+  input  wire           dmald,          // a BPLxDAT/SPRxDATx write is bitplane/sprite DMA (not copper/CPU)
   output wire [ 16-1:0] data_out,       // bus data out
   input  wire           blank,          // blanking input
   output wire [  8-1:0] red,            // red componenent video out
@@ -335,6 +335,7 @@ denise_bitplanes bplm0
   .reg_address_in(reg_address_in),
   .data_in(data_in),
   .chip48(chip48),
+  .dmald(dmald),
   .hires(hires),
   .shres(shres & ecs),
   .hpos(hpos),
@@ -391,7 +392,7 @@ denise_sprites sprm0
   .hpos(hpos),
   .data_in(data_in),
   .chip48(chip48),
-  .dbr(dbr),
+  .dmald(dmald),
   .sprena(display_ena | brdsprt),
   .esprm(esprm),
   .osprm(osprm),

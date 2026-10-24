@@ -39,4 +39,20 @@ Chip behaviour fixed against the real chips (2026-10-24; tb/asm/t_chipset):
                          a CPU-written B (channel off) shifted in zeros
                          (WinUAE blitter_start_init, blitter_loadbdat); a line
                          without USEA freezes BLTAPT and the sign
+  agnus_bitplanedma.v    SHRES with HIRES is SHRES (the fetch ended as hires's:
+                         136 fetches, the modulo twice); more planes than the
+                         mode's fetch slots, or BPU3 with BPU2-0, fetch none
+                         (WinUAE real_bitplane_number, GET_PLANES)
+  agnus.v                dmald: the bus is bitplane or sprite DMA's, so a
+                         copper BPLxDAT/SPRxDATx write is not a DMA load
+  denise_bitplanes.v     Lisa's 64-bit BPLxDAT loads (WinUAE's AGA notes): DMA
+                         at FMODE 0 word,0,word,0, at FMODE 1/2 32 bits twice;
+                         copper/CPU at FMODE 1 the word four times, at 2/3 the
+                         bus's word then the word three times
+  denise_bitplane_shifter.v  the second 32-bit shifter feeds the first only at
+                         FMODE 3; hires PF1H0 (35 ns) delays one tick, not two
+  ide.v                  nIEN releases INTRQ and keeps the interrupt pending
+                         (it was only checked when raising one); SRST keeps
+                         nIEN and HOB, the write ending SRST sets them; a
+                         Command Block write clears HOB (ATA)
 Not done: Paula's attach modes (ADKCON ATVOL/ATPER), see paula_audio_channel.v.

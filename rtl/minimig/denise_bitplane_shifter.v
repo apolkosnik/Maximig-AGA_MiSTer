@@ -86,8 +86,10 @@ always @ (posedge clk) begin
     // load new data into shifter
     shifter[63:0] <= data_in[63:0];
   end else if (shift) begin
-    // shift already loaded data
-    shifter[63:0] <= {shifter[62:0],1'b0};
+    // shift already loaded data: Lisa's two 32-bit shifters, the second
+    // feeding the first only at FMODE 3 (else zeros: WinUAE's AGA Lisa notes)
+    shifter[63:32] <= {shifter[62:32], (fmode[1:0] == 2'b11) & shifter[31]};
+    shifter[31:0]  <= {shifter[30:0], 1'b0};
   end
 end
 
@@ -110,7 +112,9 @@ always @ (*) begin
   if (shres) begin
     sh_select = aga ? 3'b110 : 3'b011;
   end else if (hires) begin
-    sh_select = {aga, scroll[0], 1'b1}; // MSB bit should probably be 0, this is a hack for kickstart screen ...
+    // the 35 ns bit (PF1H0, AGA) delays by one 35 ns tick, half a hires
+    // pixel (the hires base tap stays one tick after lores', as before)
+    sh_select = aga ? 3'd5 + {2'b00, scroll[0]} : {1'b0, scroll[0], 1'b1};
   end else begin
     sh_select = {aga, scroll[1:0]};
   end

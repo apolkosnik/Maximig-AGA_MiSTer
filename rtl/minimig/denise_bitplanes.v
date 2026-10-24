@@ -34,6 +34,7 @@ module denise_bitplanes
   input   [8:1] reg_address_in,   // register address
   input   [15:0] data_in,       // bus data in
   input   [48-1:0] chip48,  // big chipram read
+  input   dmald,           // a BPLxDAT write is bitplane DMA (not the copper or the CPU)
   input   hires,             // high resolution mode select
   input   shres,             // super high resolution mode select
   input  [8:0] hpos,        // horizontal position (70ns resolution)
@@ -154,23 +155,34 @@ always @ (posedge clk) begin
   end
 end
 
-reg [47:0] chip48_fmode=0;
-always @ (*) begin
-  case (fmode[1:0])
-    2'b11   : chip48_fmode[47:0] = chip48[47:0];
-    2'b10,
-    2'b01   : chip48_fmode[47:0] = {chip48[47:32], 32'h00000000};
-    default : chip48_fmode[47:0] = 48'h000000000000;
-  endcase
-end
-
-
 //--------------------------------------------------------------------------------------
 
 wire clk7n_en = c1 & c3;
 
 reg [15:0] data16;
-always @(posedge clk) if (clk7_en) data16 <= data_in;
+reg        dma16;
+always @(posedge clk) if (clk7_en) begin data16 <= data_in; dma16 <= dmald; end
+
+// what a BPLxDAT write loads into Lisa's 64 bits (WinUAE's AGA Lisa shifter
+// notes, from hardware tests): DMA at FMODE 0 the word, zeros, the word,
+// zeros; at FMODE 1/2 its 32 bits twice; at FMODE 3 all 64.  A copper or CPU
+// write: FMODE 0 as DMA, FMODE 1 the word four times, FMODE 2/3 the bus's
+// previous word, then the word three times
+reg [63:0] bpl_load;
+always @(*)
+  if (dma16)
+    case (fmode[1:0])
+      2'b11   : bpl_load = {data16, chip48[47:0]};
+      2'b10,
+      2'b01   : bpl_load = {data16, chip48[47:32], data16, chip48[47:32]};
+      default : bpl_load = {data16, 16'h0000, data16, 16'h0000};
+    endcase
+  else
+    case (fmode[1:0])
+      2'b00   : bpl_load = {data16, 16'h0000, data16, 16'h0000};
+      2'b01   : bpl_load = {data16, data16, data16, data16};
+      default : bpl_load = {chip48[47:32], data16, data16, data16};
+    endcase
 
 //bitplane buffer register for plane 1
 always @(posedge clk) begin
@@ -178,7 +190,7 @@ always @(posedge clk) begin
 	if(clk7_en && reg_address_in[8:1] == BPL1DAT[8:1]) st <= 1;
 	if(st & clk7n_en) begin
 		st <= 0;
-		bpl1dat <= {data16,chip48_fmode};
+		bpl1dat <= bpl_load;
 	end
 end
 
@@ -188,7 +200,7 @@ always @(posedge clk) begin
 	if(clk7_en && reg_address_in[8:1] == BPL2DAT[8:1]) st <= 1;
 	if(st & clk7n_en) begin
 		st <= 0;
-		bpl2dat <= {data16,chip48_fmode};
+		bpl2dat <= bpl_load;
 	end
 end
 
@@ -198,7 +210,7 @@ always @(posedge clk) begin
 	if(clk7_en && reg_address_in[8:1] == BPL3DAT[8:1]) st <= 1;
 	if(st & clk7n_en) begin
 		st <= 0;
-		bpl3dat <= {data16,chip48_fmode};
+		bpl3dat <= bpl_load;
 	end
 end
 
@@ -208,7 +220,7 @@ always @(posedge clk) begin
 	if(clk7_en && reg_address_in[8:1] == BPL4DAT[8:1]) st <= 1;
 	if(st & clk7n_en) begin
 		st <= 0;
-		bpl4dat <= {data16,chip48_fmode};
+		bpl4dat <= bpl_load;
 	end
 end
 
@@ -218,7 +230,7 @@ always @(posedge clk) begin
 	if(clk7_en && reg_address_in[8:1] == BPL5DAT[8:1]) st <= 1;
 	if(st & clk7n_en) begin
 		st <= 0;
-		bpl5dat <= {data16,chip48_fmode};
+		bpl5dat <= bpl_load;
 	end
 end
 
@@ -228,7 +240,7 @@ always @(posedge clk) begin
 	if(clk7_en && reg_address_in[8:1] == BPL6DAT[8:1]) st <= 1;
 	if(st & clk7n_en) begin
 		st <= 0;
-		bpl6dat <= {data16,chip48_fmode};
+		bpl6dat <= bpl_load;
 	end
 end
 
@@ -238,7 +250,7 @@ always @(posedge clk) begin
 	if(clk7_en && reg_address_in[8:1] == BPL7DAT[8:1]) st <= 1;
 	if(st & clk7n_en) begin
 		st <= 0;
-		bpl7dat <= {data16,chip48_fmode};
+		bpl7dat <= bpl_load;
 	end
 end
 
@@ -248,7 +260,7 @@ always @(posedge clk) begin
 	if(clk7_en && reg_address_in[8:1] == BPL8DAT[8:1]) st <= 1;
 	if(st & clk7n_en) begin
 		st <= 0;
-		bpl8dat <= {data16,chip48_fmode};
+		bpl8dat <= bpl_load;
 	end
 end
 

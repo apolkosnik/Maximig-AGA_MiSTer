@@ -19,7 +19,7 @@ module denise_sprites_shifter
   input [15:0] fmode,
   input shift,
   input [48-1:0] chip48,
-  input   dbr,               // the chip bus is the DMA's: a data write is sprite DMA
+  input   dbr,               // a data write is sprite DMA (Agnus dmald), not the copper or CPU
   input   [15:0] data_in,     // bus data in
   output  [1:0] sprdata,      // serialized sprite data out
   output  reg attach        // sprite is attached

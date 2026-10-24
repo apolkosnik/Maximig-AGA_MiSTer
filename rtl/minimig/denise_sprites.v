@@ -33,7 +33,7 @@ module denise_sprites
   input  [8:0] hpos,        // horizontal beam counter
   input   [15:0] data_in,     // bus data in
   input [47:0] chip48,
-  input dbr,                 // the chip bus is the DMA's (sprite data writes: DMA or CPU)
+  input dmald,               // a sprite data write is sprite DMA (not copper/CPU)
   input  sprena,          // sprite enable signal
   input [3:0] esprm,
   input [3:0] osprm,
@@ -132,7 +132,7 @@ denise_sprites_shifter sps0
   .fmode(fmode),
   .shift(shift),
   .chip48(chip48),
-  .dbr(dbr),
+  .dbr(dmald),
   .data_in(data_in),
   .sprdata(sprdat0),
   .attach(attach0)
@@ -152,7 +152,7 @@ denise_sprites_shifter sps1
   .fmode(fmode),
   .shift(shift),
   .chip48(chip48),
-  .dbr(dbr),
+  .dbr(dmald),
   .data_in(data_in),
   .sprdata(sprdat1),
   .attach(attach1)
@@ -172,7 +172,7 @@ denise_sprites_shifter sps2
   .fmode(fmode),
   .shift(shift),
   .chip48(chip48),
-  .dbr(dbr),
+  .dbr(dmald),
   .data_in(data_in),
   .sprdata(sprdat2),
   .attach(attach2)
@@ -192,7 +192,7 @@ denise_sprites_shifter sps3
   .fmode(fmode),
   .shift(shift),
   .chip48(chip48),
-  .dbr(dbr),
+  .dbr(dmald),
   .data_in(data_in),
   .sprdata(sprdat3),
   .attach(attach3)
@@ -212,7 +212,7 @@ denise_sprites_shifter sps4
   .fmode(fmode),
   .shift(shift),
   .chip48(chip48),
-  .dbr(dbr),
+  .dbr(dmald),
   .data_in(data_in),
   .sprdata(sprdat4),
   .attach(attach4)
@@ -232,7 +232,7 @@ denise_sprites_shifter sps5
   .fmode(fmode),
   .shift(shift),
   .chip48(chip48),
-  .dbr(dbr),
+  .dbr(dmald),
   .data_in(data_in),
   .sprdata(sprdat5),
   .attach(attach5)
@@ -252,7 +252,7 @@ denise_sprites_shifter sps6
   .fmode(fmode),
   .shift(shift),
   .chip48(chip48),
-  .dbr(dbr),
+  .dbr(dmald),
   .data_in(data_in),
   .sprdata(sprdat6),
   .attach(attach6)
@@ -272,7 +272,7 @@ denise_sprites_shifter sps7
   .fmode(fmode),
   .shift(shift),
   .chip48(chip48),
-  .dbr(dbr),
+  .dbr(dmald),
   .data_in(data_in),
   .sprdata(sprdat7),
   .attach(attach7)

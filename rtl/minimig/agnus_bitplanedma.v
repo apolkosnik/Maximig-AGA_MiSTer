@@ -319,8 +319,17 @@ always @ (posedge clk) begin
 end
 
 assign shres = ecs & bplcon0_delayed[5];
-assign hires = bplcon0_delayed[4];
-assign bpu = aga ? bplcon0_delayed[3:0] : {1'b0, &bplcon0_delayed[2:0] ? 3'd4 : bplcon0_delayed[2:0]};
+assign hires = bplcon0_delayed[4] & ~shres;   // SHRES takes priority (WinUAE GET_RES_AGNUS)
+
+// planes: BPU3 with BPU2-0 (more than 8) is none (WinUAE GET_PLANES); more
+// planes than the mode's fetch slots is none too, no bitplane DMA at all
+// (WinUAE real_bitplane_number); OCS lores 7 is 4
+wire [3:0] bpu_set = aga ? (bplcon0_delayed[3] && |bplcon0_delayed[2:0] ? 4'd0 : bplcon0_delayed[3:0])
+                         : {1'b0, bplcon0_delayed[2:0]};
+wire [3:0] bpu_max = shres ? (bp_fmode0 ? 4'd2 : bp_fmode12 ? 4'd4 : 4'd8)
+                   : hires ? (bp_fmode0 ? 4'd4 : 4'd8)
+                   : 4'd8;
+assign bpu = bpu_set > bpu_max ? 4'd0 : (!aga && bpu_set == 4'd7) ? 4'd4 : bpu_set;
 
 // fmode
 always @ (posedge clk) begin

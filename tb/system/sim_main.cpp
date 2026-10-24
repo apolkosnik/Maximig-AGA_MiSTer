@@ -38,7 +38,8 @@
 //   beat): +0 result ($600D0000 + n PASS, $BAD00000 + n FAIL: the run ends),
 //   +4 a character, +8 a value printed in hex, +12 a mark (3: the share
 //   window check; 4: the bench presses the HRTmon key, Help, $5F; 5: the
-//   next complete frame's dominant colour goes to chip RAM $1F10).
+//   next complete frame's dominant colour goes to chip RAM $1F10; 6: line
+//   150's first and last non-black 35 ns samples and their count, $1F20).
 #include "Vtb_top.h"
 #include "Vtb_top__Dpi.h"
 #include "verilated.h"
@@ -213,6 +214,10 @@ struct Video {
 	std::vector<uint8_t> buf = std::vector<uint8_t>(W * H * 3);
 	int sub = 0;
 	int colour_req = 0;   // frames until the dominant-colour report (mark 5)
+	// mark 6: on line EDGE_Y of the next complete frame, the first and the
+	// last non-black sample and how many, at every sample (35 ns, not xscale)
+	static const int EDGE_Y = 150;
+	int edge_req = 0, xs = 0, e_first = -1, e_last = -1, e_count = 0;
 
 	void sample()
 	{
@@ -220,11 +225,21 @@ struct Video {
 		if (old_vs && !vs) {
 			if (!dir.empty() && (frame % every) == 0) write();
 			if (colour_req > 0 && --colour_req == 0) report_colour();
+			if (edge_req == 1) { report_edge(); edge_req = 0; }
+			else if (edge_req == 2) { edge_req = 1; e_first = e_last = -1; e_count = 0; }
 			frame++;
 			y = 0;
 		}
-		if (old_hs && !hs) { if (x > maxx) maxx = x; x = 0; y++; sub = 0; }
+		if (old_hs && !hs) { if (x > maxx) maxx = x; x = 0; y++; sub = 0; xs = 0; }
 		old_hs = hs; old_vs = vs;
+		if (edge_req == 1 && y == EDGE_Y) {
+			if (top->red || top->green || top->blue) {
+				if (e_first < 0) e_first = xs;
+				e_last = xs;
+				e_count++;
+			}
+		}
+		xs++;
 		if (++sub < xscale) return;
 		sub = 0;
 		if (x < W && y < H) {
@@ -254,6 +269,17 @@ struct Video {
 		sdram_poke16(0x1F16 >> 1, (uint32_t)bn >> 16);   // its sample count
 		sdram_poke16(0x1F18 >> 1, (uint32_t)bn & 0xFFFF);
 		sdram_poke16(0x1F14 >> 1, 0xAA55);
+	}
+	// mark 6's report: chip RAM $1F20 the first sample, $1F22 the last,
+	// $1F24 the count, $1F26 $AA55 (done)
+	void report_edge()
+	{
+		printf("[video] line %d: first %d last %d count %d\n", EDGE_Y, e_first, e_last, e_count);
+		sdram_scope();
+		sdram_poke16(0x1F20 >> 1, (uint16_t)e_first);
+		sdram_poke16(0x1F22 >> 1, (uint16_t)e_last);
+		sdram_poke16(0x1F24 >> 1, (uint16_t)e_count);
+		sdram_poke16(0x1F26 >> 1, 0xAA55);
 	}
 	void write()
 	{
@@ -453,6 +479,7 @@ int main(int argc, char **argv)
 						if (d == 3 && !share_check()) { printf("[share] FAIL: Main would not see the request\n"); result = 1; }
 						if (d == 4) { key_at = halfstep; printf("[hrtmon] the HRTmon key\n"); }
 						if (d == 5) video.colour_req = 2;   // the next complete frame
+						if (d == 6) video.edge_req = 2;
 					}
 				}
 			}

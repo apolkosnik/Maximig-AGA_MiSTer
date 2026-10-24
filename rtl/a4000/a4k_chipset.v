@@ -161,7 +161,7 @@ wire        ram_rd, ram_hwr, ram_lwr;
 wire        cpu_rd, rd_cyc, cpu_hwr, cpu_lwr;
 wire  [8:1] reg_address;
 wire        cpu_custom;
-wire        dbr, dbwe;
+wire        dbr, dbwe, dmald;
 wire        _led;
 wire        int2, int3, int6;
 wire        _fire0, _fire1, _fire0_dat, _fire1_dat;
@@ -289,6 +289,7 @@ agnus AGNUS1
 	.bitplane_fetch_unit_start(bitplane_fetch_unit_start),
 	.cpu_custom(cpu_custom),
 	.dbr(dbr),
+	.dmald(dmald),
 	.dbwe(dbwe),
 	._hsync(_hsync),
 	._vsync(_vsync),
@@ -447,7 +448,7 @@ denise DENISE1
 	.reg_address_in(reg_address),
 	.data_in(custom_data_in),
 	.chip48(chip48),
-	.dbr(dbr),
+	.dmald(dmald),
 	.data_out(denise_data_out),
 	.blank(~_hsync|vblank),
 	.red(red),
