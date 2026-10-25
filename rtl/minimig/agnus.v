@@ -130,6 +130,7 @@ wire bpl_run;                   //the bitplane sequencer runs (BPRUN)
 // slot (WinUAE generate_sprites: bprun; changelog: "sprites are only
 // inhibited when internal bitplane activity signal is active")
 wire dma_spr = req_spr & spren & ~bpl_run; //sprite dma is using its slot
+wire int3_flush;                //INT3 of a blit whose final D is still to write (BLS held off)
 wire dma_cop = req_cop & copen; //copper dma is using its slot
 wire dma_blt = req_blt & blten; //blitter dma is using its slot
 
@@ -209,7 +210,7 @@ begin
 		reg_address = reg_address_cop;
 		dbwe = 0;
 	end
-	else if (dma_blt && bls_cnt!=BLS_CNT_MAX) begin
+	else if (dma_blt && (bls_cnt!=BLS_CNT_MAX || int3_flush)) begin
 		// bus allocated to blitter
 		cpu_custom = 0;
 		dbr = 1;
@@ -272,7 +273,7 @@ wire spren  = dmacon[5] & dmacon[9];
 wire ena_cop = ~dma_bpl;
 //dma enable for blitter tells the blitter that no higher priority dma channel is using the bus
 //since blitter has the lowest priority and can use any dma slot (even and odd) all other dma channels block blitter activity
-wire ena_blt = ~(dma_ref | dma_dsk | dma_aud | dma_spr | dma_bpl | dma_cop) && bls_cnt!=BLS_CNT_MAX ? 1'b1 : 1'b0;
+wire ena_blt = ~(dma_ref | dma_dsk | dma_aud | dma_spr | dma_bpl | dma_cop) && (bls_cnt!=BLS_CNT_MAX || int3_flush) ? 1'b1 : 1'b0;
 
 //--------------------------------------------------------------------------------------
 
@@ -432,9 +433,22 @@ agnus_copper cp1
 
 reg [1:0] bls_cnt;      //blitter slowdown counter, counts memory cycles when the CPU misses the bus
 
+// the A1200/A4000 board's fix for Alice (a PAL on the A4000): while the
+// blitter's INT3 is active, BLS is held off for the CPU's next chip cycle,
+// so the CPU cannot take the cycles the blit's final D still needs (WinUAE
+// custom.cpp: nasty_cnt held off while blit_interrupt_trigger; changelog:
+// Zool 2 AGA, Charlie J Cool in 7-plane lores FMODE 0)
+reg bls_hold, bls_d;
+always @(posedge clk) if (clk7_en) begin
+	bls_d <= bls;
+	if (reset)              bls_hold <= 1'b0;
+	else if (int3)          bls_hold <= 1'b1;
+	else if (bls_d && !bls) bls_hold <= 1'b0;   // the CPU's waiting cycle is done
+end
+
 always @(posedge clk) if (clk7_en) begin
 	if (!cck)
-		if (!bls || bltpri) bls_cnt <= 2'b00;
+		if (!bls || bltpri || bls_hold || int3_flush) bls_cnt <= 2'b00;
 		else if (bls_cnt[1:0] != BLS_CNT_MAX) bls_cnt <= bls_cnt + 2'b01;
 end
 
@@ -453,6 +467,7 @@ agnus_blitter bl1
 	.clk7_en(clk7_en),
 	.reset(reset),
 	.ecs(ecs),
+	.aga(aga),
 	.clkena(cck),
 	.enadma(blten & ena_blt),
 	.reqdma(req_blt),
@@ -461,6 +476,7 @@ agnus_blitter bl1
 	.zero(blit_zero),
 	.busy(blit_busy),
 	.int3(int3),
+	.int3_flush(int3_flush),
 	.data_in(data_in),
 	.data_out(data_blt),
 	.reg_address_in(reg_address),

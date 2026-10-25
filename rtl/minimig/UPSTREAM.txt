@@ -71,4 +71,10 @@ Chip behaviour fixed against the real chips (2026-10-24; tb/asm/t_chipset):
                          a VPOSW write clears LOL
   agnus_bitplanedma.v    the field's last line closes the vertical window (no
                          bitplane DMA as vertical blank starts)
+  agnus_blitter.v        AGA: with the final D still to write, BBUSY and INT3
+                         two CCKs after the last main cycle (Alice), a BLTSIZE
+                         in those two starting its blit after them
+  agnus.v                the A1200/A4000 board's fix for Alice: INT3 of such a
+                         blit holds BLS off until the CPU's next chip cycle,
+                         so the final D takes the next free slot
 Not done: Paula's attach modes (ADKCON ATVOL/ATPER), see paula_audio_channel.v.

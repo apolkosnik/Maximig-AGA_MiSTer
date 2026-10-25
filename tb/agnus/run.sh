@@ -15,7 +15,7 @@ verilator --cc --exe --build -j 8 -O2 --no-timing --public-flat-rw --x-assign fa
 	$M/agnus_blitter_adrgen.v $M/agnus_bitplanedma.v $M/agnus_beamcounter.v $M/agnus_audiodma.v \
 	$M/amiga_clk.v tb_agnus.cpp -o tb_agnus > build.log 2>&1 || { tail -20 build.log; exit 1; }
 : > run.log
-for t in "beam" "beam ntsc" "lol" "dmacon" "lace" "lace ntsc" "lastline" "vhposr" "cop" "sprwin" "nasty" "slots pal 0"; do
+for t in "beam" "beam ntsc" "lol" "dmacon" "lace" "lace ntsc" "lastline" "vhposr" "cop" "sprwin" "nasty" "bltend" "slots pal 0"; do
 	echo "=== tb_agnus $t" >> run.log
 	timeout 300 ./obj/tb_agnus $t >> run.log 2>&1 || echo "FAIL tb_agnus $t exited $?" >> run.log
 done

@@ -440,6 +440,81 @@ static void t_nasty(int pri)
 	printf("BLTPRI=%d, CPU waiting: chipset slots over 120 CCK: blitter %d, free (CPU) %d\n  %s\n", pri, blt, freec, pat.c_str());
 }
 
+// the end of a blit on AGA with the final D still to write: BBUSY and INT3
+// two CCKs after the last main cycle, as the final D is written on a free
+// bus (Alice; WinUAE shifter_d_aga); with heavy bitplane DMA (7 lores
+// planes) and the CPU waiting, the final D takes the first free slot after
+// INT3, not the CPU (the A4000's PAL holds BLS off: WinUAE nasty_cnt while
+// blit_interrupt_trigger)
+static int bltend_run(int planes, int words, int line, int start_h, std::string *patout)
+{
+	cpu_write(0x054, 0x0006); cpu_write(0x056, 0);
+	cpu_write(0x050, 0x0004); cpu_write(0x052, 0);
+	while (!(vp() == line && hp() == start_h)) slot();
+	cpu_write(0x058, (1 << 6) | words);                        // BLTSIZE: words x 1
+	bool waiting = planes != 0;
+	if (waiting) t->bls = 1;
+	std::string pat;
+	int k = 0, busy_off = -1, last_d = -1, int3_at = -1, cpu_after_int3 = 0;
+	for (int i = 0; i < 8 * 600 && (busy_off < 0 || last_d < 0 || k < busy_off + 24); i++) {
+		t->clk = 0; eval();
+		bool en = t->clk7_en, c = t->cck;
+		const char *o = (en && c) ? owner() : nullptr;
+		bool dw = o && !strcmp(o, "BLT") && R(we_blt);
+		bool busy = R(blit_busy), irq = R(int3);
+		t->clk = 1; eval(); cyc++;
+		if (waiting && en && !c) t->bls = 1;
+		if (!o) continue;
+		std::string so = o;
+		if (irq && int3_at < 0) int3_at = k;
+		if (dw) { last_d = k; pat += 'D'; }
+		else if (so == "BLT") pat += 'B';
+		else if (so == ".") { pat += '.'; if (waiting) t->bls = 0; if (int3_at >= 0 && last_d < int3_at) cpu_after_int3++; }
+		else if (so == "BPL") pat += 'p';
+		else pat += 'o';
+		if (!busy && busy_off < 0 && k > 2) busy_off = k;
+		k++;
+	}
+	t->bls = 0;
+	if (patout) *patout = pat + "  (int3 " + std::to_string(int3_at) + ", last D " + std::to_string(last_d) + ", busy off " + std::to_string(busy_off) + ")";
+	// (planes: the CPU slots taken while the final D was pending after INT3,
+	// or -1 when the final D was not pending; no planes: CCKs D to BBUSY off)
+	if (!planes) return busy_off - last_d;
+	return last_d >= int3_at ? cpu_after_int3 : -1;
+}
+
+static void t_bltend(int planes)
+{
+	reset_chip(false);
+	cpu_write(0x096, 0x7FFF);
+	cpu_write(0x08E, 0x2C81); cpu_write(0x090, 0x2CC1);
+	cpu_write(0x092, 0x38); cpu_write(0x094, 0xD0);
+	cpu_write(0x1FC, 0);
+	cpu_write(0x100, (planes << 12) | 0x0200);
+	cpu_write(0x096, 0x8240 | (planes ? 0x100 : 0));          // DMAEN BLTEN (BPLEN), not nasty
+	cpu_write(0x040, 0x09F0); cpu_write(0x042, 0);              // A->D copy
+	cpu_write(0x044, 0xFFFF); cpu_write(0x046, 0xFFFF);
+	cpu_write(0x064, 0); cpu_write(0x066, 0);
+	if (!planes) {
+		std::string pat;
+		int d = bltend_run(0, 4, 100, 0x50, &pat);
+		printf("0 planes, 4 words: CCKs from the final D write to BBUSY off %d\n  %s\n", d, pat.c_str());
+		check("CCKs from the final D write to BBUSY clearing, free bus (AGA: 0-1)", d >= 0 && d <= 1, 1);
+		return;
+	}
+	// blits that end inside the 7-plane fetch window (one free slot in 8):
+	// the final D waits for a free slot after INT3
+	int pending = 0, stolen = 0;
+	for (int w = 1; w <= 20; w++) {
+		std::string pat;
+		int r = bltend_run(planes, w, 60 + 2 * w, 0x40, &pat);
+		if (r >= 0) { pending++; stolen += r; if (r) printf("  %d words: %d CPU slots before the final D\n  %s\n", w, r, pat.c_str()); }
+	}
+	printf("%d planes: %d of 20 blits had the final D pending at INT3, %d CPU slots taken before it\n", planes, pending, stolen);
+	check("blits whose final D was pending at INT3 (the case exercised)", pending > 0, 1);
+	check("CPU slots between INT3 and a pending final D (A4000 PAL: 0)", stolen, 0);
+}
+
 int main(int argc, char **argv)
 {
 	Verilated::commandArgs(argc, argv);
@@ -476,6 +551,7 @@ int main(int argc, char **argv)
 		sprwin_case(3, 8, 0x18, 3);
 	}
 	else if (test == "nasty") { t_nasty(0); t_nasty(1); }
+	else if (test == "bltend") { t_bltend(0); t_bltend(7); }
 	else if (test == "lace") t_lace(ntsc);
 	else if (test == "lastline") t_lastline();
 	else if (test == "slots") t_slots(ntsc, argc > 3 ? atoi(argv[3]) : 0, argc > 4 ? strtol(argv[4], 0, 16) : 0x38);

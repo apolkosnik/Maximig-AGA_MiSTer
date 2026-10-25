@@ -9,11 +9,12 @@
 //    cycles, DMA slots and E-clock synchronised CIA cycles are those of the
 //    chip bus.  A long word to chip RAM is one 32-bit cycle (the AGA CPU
 //    path, cpu_long); every other long word is two 16-bit cycles, high word
-//    first, as the 68030-style motherboard bus sizes a 16-bit port.  In
-//    A4000 timing each chip-bus access also waits CHIP_SYNC colour clocks
-//    after the chip bus has terminated it: Budgie's resynchronisation to
-//    the CPU bus (with the card's own cost this gives the ~3 colour clocks
-//    per access the A3640 measures).
+//    first, as the 68030-style motherboard bus sizes a 16-bit port.  A
+//    chip-bus access can also wait CHIP_SYNC colour clocks after the chip
+//    bus has terminated it (Budgie's resynchronisation to the CPU bus); it
+//    is 0: the bridge and the card's own cost already give the A3640's
+//    measured chip line fill (tb/system/timing_check.py), so Fast timing
+//    changes nothing on the chip bus.
 //  * the RP5C01 (a4k_rtc): 4-bit registers on the odd byte of $DC0000+4n.
 //  * the A4000 IDE (ide.v): the task file at $DD2020+4n, data on D31-D16 of
 //    the long word at $DD2020, byte registers on D15-D8 (Linux pata_gayle:

@@ -82,6 +82,7 @@ module agnus_blitter
   input clk7_en,
 	input 	reset,	 					// reset
 	input	ecs,						// enable ECS extensions
+	input	aga,						// AGA: busy and the interrupt wait for the final D write
 	input	clkena,						// enables blitter operation (used to slow it down)
 	input	enadma,						// no other dma channel is granted the bus
 	output	reqdma,						// blitter requests dma cycle
@@ -90,6 +91,7 @@ module agnus_blitter
 	output	reg zero,					// blitter zero status
 	output	reg busy,					// blitter busy status
 	output	int3,						// blitter finish interrupt request
+	output	int3_flush,					// INT3 with the final D still to write (AGA), from registers only
 	input 	[15:0] data_in,	    		// bus data in
 	output	[15:0] data_out,			// bus data out
 	input 	[8:1] reg_address_in,		// register address inputs
@@ -501,24 +503,56 @@ assign we = ackdma && chsel[1:0]==CHD ? 1'b1 : 1'b0;
 
 //--------------------------------------------------------------------------------------
 
+// the end of the blit as busy and the interrupt see it: on AGA, with the
+// final D still to write (D enabled, not a line), two CCKs after the last
+// main cycle -- when the bus is free, as the final D is written (Alice's
+// schematics; WinUAE shifter_d_aga: "AGA delays blitter finished signal
+// until last D write is done (2 cycles later)"); else at the last main
+// cycle.  With heavy bitplane DMA the final D may still wait for a slot:
+// the board's BLS hold (agnus.v) gives it the next free one
+wire bltsize_wr = reg_address_in[8:1]==BLTSIZE[8:1] || reg_address_in[8:1]==BLTSIZH[8:1] && ecs;
+// (the last main cycle hands over to the flush, BLT_E/F)
+wire to_flush = blt_state==BLT_D && used;
+reg  [1:0] fl_cnt;          // CCKs to the delayed end
+always @(posedge clk)
+  if (clk7_en) begin
+  	if (reset)
+  		fl_cnt <= 0;
+  	else if (aga && done && to_flush)
+  		fl_cnt <= 2'd2;
+  	else if (clkena && fl_cnt != 0)
+  		fl_cnt <= fl_cnt - 2'd1;
+  end
+assign int3_flush = aga && clkena && fl_cnt == 2'd1;
+wire done_end = aga ? (done && !to_flush) || int3_flush : done;
+// a BLTSIZE written in those two CCKs starts its blit after them
+reg  size_pend;
+always @(posedge clk)
+  if (clk7_en) begin
+  	if (reset || done_end)
+  		size_pend <= 0;
+  	else if (bltsize_wr && fl_cnt != 0)
+  		size_pend <= 1;
+  end
+
 // 'busy' flag control
 always @(posedge clk)
   if (clk7_en) begin
   	if (reset)
   		busy <= 0;
-  	else if (reg_address_in[8:1]==BLTSIZE[8:1] || reg_address_in[8:1]==BLTSIZH[8:1] && ecs) // set immediately after a write to BLTSIZE or BLTSIZH (ECS)
+  	else if (bltsize_wr) // set immediately after a write to BLTSIZE or BLTSIZH (ECS)
   		busy <= 1;
-  	else if (done) // cleared when the blit is done
+  	else if (done_end && !size_pend) // cleared when the blit is done
   		busy <= 0;
   end
 
 // blitter finish interrupt request
-assign int3 = done;
+assign int3 = done_end;
 
 // FSM start control (one bus clock cycle delay for cycle exact compatibility)
 always @(posedge clk)
   if (clk7_en) begin
-  	if (reset || done)
+  	if (reset || done_end && !size_pend)
   		start <= 0;
   	else if (clkena && busy)
   		start <= 1;
