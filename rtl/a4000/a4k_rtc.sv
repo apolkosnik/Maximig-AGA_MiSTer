@@ -36,7 +36,8 @@ module a4k_rtc
 );
 
 // the time, BCD
-reg [7:0] sec, min, hour, mday, mon, year;
+reg [7:0] sec, min, mday, mon, year;
+reg [3:0] hr_lo, hr_hi;   // registers 4 and 5 as written: 24-hour tens, or 12-hour {PM, tens}
 reg [2:0] wday;
 reg [3:0] mode_d;
 reg [3:0] alarm [13];
@@ -65,27 +66,44 @@ endfunction
 wire h24 = alarm[10][0];
 wire [1:0] bank = mode_d[1:0];
 
-// 12-hour display of the BCD hour: 12, 1..11 with PM
-reg [7:0] hour12;
-reg       pm;
-always @(*) begin
+// the 24-hour BCD hour from the MiSTer as the 12-hour registers {PM, tens}, ones
+// (12 AM is 12, 12 PM is 12 with PM)
+function automatic [7:0] to12(input [7:0] h24bcd);
 	logic [4:0] h;
-	h  = hour[7:4] * 4'd10 + hour[3:0];
-	pm = (h >= 5'd12);
-	if (h == 5'd0 || h == 5'd12) hour12 = 8'h12;
-	else if (h > 5'd12)          hour12 = ((h - 5'd12) >= 5'd10) ? {4'd1, 4'(h - 5'd22)} : {4'd0, 4'(h - 5'd12)};
-	else                         hour12 = hour;
-end
-
-// a 12-hour write: the hour from its tens digit, ones digit and PM flag, as
-// the 24-hour BCD the clock keeps (12 AM is 00, 12 PM is 12)
-function automatic [7:0] from12(input [3:0] tens, input [3:0] ones, input p);
-	logic [4:0] h;
-	h = tens[0] * 4'd10 + ones;
-	if (h == 5'd12) h = p ? 5'd12 : 5'd0;
-	else if (p)     h = h + 5'd12;
-	from12 = (h >= 5'd20) ? {4'd2, 4'(h - 5'd20)} : (h >= 5'd10) ? {4'd1, 4'(h - 5'd10)} : {4'd0, 4'(h)};
+	h = h24bcd[7:4] * 4'd10 + h24bcd[3:0];
+	if (h == 5'd0)       to12 = 8'h12;
+	else if (h == 5'd12) to12 = 8'h32;
+	else if (h > 5'd12)  to12 = ((h - 5'd12) >= 5'd10) ? {4'd3, 4'(h - 5'd22)} : {4'd2, 4'(h - 5'd12)};
+	else                 to12 = h24bcd;
 endfunction
+
+// the 12-hour registers {PM, tens}, ones as the 24-hour BCD hour (12 AM is 00)
+function automatic [7:0] to24(input [7:0] r12);
+	logic [4:0] h;
+	h = r12[4] * 4'd10 + r12[3:0];
+	if (h == 5'd12)  h = r12[5] ? 5'd12 : 5'd0;
+	else if (r12[5]) h = h + 5'd12;
+	to24 = (h >= 5'd20) ? {4'd2, 4'(h - 5'd20)} : (h >= 5'd10) ? {4'd1, 4'(h - 5'd10)} : {4'd0, 4'(h)};
+endfunction
+
+// the hour after this one, and whether the day ends with it: in 12-hour mode
+// 11 -> 12 turns PM over (11 PM -> 12 AM is midnight), 12 -> 01 keeps it
+wire [7:0] hr = {hr_hi, hr_lo};
+reg  [7:0] hr_next;
+reg        hr_wrap;
+always @(*) begin
+	hr_wrap = 1'b0;
+	if (h24) begin
+		hr_wrap = (hr[5:0] == 6'h23);
+		hr_next = hr_wrap ? 8'h00 : bcd_inc({2'b00, hr[5:0]});
+	end
+	else if (hr[4:0] == 5'h11) begin
+		hr_wrap = hr[5];
+		hr_next = {2'b00, ~hr[5], 5'h12};
+	end
+	else if (hr[4:0] == 5'h12) hr_next = {2'b00, hr[5], 5'h01};
+	else                       hr_next = {2'b00, hr[5], 5'(bcd_inc({3'b000, hr[4:0]}))};
+end
 
 always @(*) begin
 	rdata = 4'h0;
@@ -96,8 +114,8 @@ always @(*) begin
 		4'h1: rdata = sec[7:4];
 		4'h2: rdata = min[3:0];
 		4'h3: rdata = min[7:4];
-		4'h4: rdata = h24 ? hour[3:0] : hour12[3:0];
-		4'h5: rdata = h24 ? hour[7:4] : {2'b00, pm, hour12[4]};
+		4'h4: rdata = hr_lo;
+		4'h5: rdata = hr_hi;
 		4'h6: rdata = {1'b0, wday};
 		4'h7: rdata = mday[3:0];
 		4'h8: rdata = mday[7:4];
@@ -123,7 +141,7 @@ always @(posedge clk) begin
 	if (old_flag ^ hps_rtc[64]) begin
 		sec  <= hps_rtc[7:0];
 		min  <= hps_rtc[15:8];
-		hour <= hps_rtc[23:16];
+		{hr_hi, hr_lo} <= h24 ? hps_rtc[23:16] : to12(hps_rtc[23:16]);
 		mday <= hps_rtc[31:24];
 		mon  <= hps_rtc[39:32];
 		year <= hps_rtc[47:40];
@@ -138,9 +156,8 @@ always @(posedge clk) begin
 			if (min != 8'h59) min <= bcd_inc(min);
 			else begin
 				min <= 8'h00;
-				if (hour != 8'h23) hour <= bcd_inc(hour);
-				else begin
-					hour <= 8'h00;
+				{hr_hi, hr_lo} <= hr_next;
+				if (hr_wrap) begin
 					wday <= (wday == 3'd6) ? 3'd0 : wday + 1'd1;
 					if (mday != mdays(mon, year)) mday <= bcd_inc(mday);
 					else begin
@@ -167,7 +184,12 @@ always @(posedge clk) begin
 				4'h0, 4'h1, 4'h9, 4'hC: alarm[reg_sel] <= 4'h0;
 				4'h3, 4'h6:             alarm[reg_sel] <= wdata & 4'h7;
 				4'h5, 4'h8, 4'hB:       alarm[reg_sel] <= wdata & 4'h3;
-				4'hA:                   alarm[reg_sel] <= wdata & 4'h1;
+				4'hA: begin
+					alarm[reg_sel] <= wdata & 4'h1;
+					// a change of 12/24-hour mode: the hour as the other mode
+					// reads it (WinUAE keeps one time; 1 PM is 13)
+					if (wdata[0] != h24) {hr_hi, hr_lo} <= wdata[0] ? to24(hr) : to12(hr);
+				end
 				default:                alarm[reg_sel] <= wdata;
 			endcase
 		end
@@ -176,8 +198,8 @@ always @(posedge clk) begin
 			4'h1: sec[7:4]  <= wdata & 4'h7;
 			4'h2: min[3:0]  <= wdata;
 			4'h3: min[7:4]  <= wdata & 4'h7;
-			4'h4: hour <= h24 ? {hour[7:4], wdata} : from12(hour12[7:4], wdata, pm);
-			4'h5: hour <= h24 ? {wdata & 4'h3, hour[3:0]} : from12({3'd0, wdata[0]}, hour12[3:0], wdata[1]);
+			4'h4: hr_lo     <= wdata;
+			4'h5: hr_hi     <= wdata & 4'h3;
 			4'h6: wday      <= wdata[2:0];
 			4'h7: mday[3:0] <= wdata;
 			4'h8: mday[7:4] <= wdata & 4'h3;
@@ -194,7 +216,7 @@ end
 initial begin
 	for (int i = 0; i < 13; i++) begin alarm[i] = 4'h0; ram[i] = 8'h00; end
 	alarm[10] = 4'h1;                    // 24-hour mode (WinUAE's default)
-	{sec, min, hour, mday, mon, year, wday} = {8'h00, 8'h00, 8'h00, 8'h01, 8'h01, 8'h26, 3'd4};
+	{sec, min, hr_hi, hr_lo, mday, mon, year, wday} = {8'h00, 8'h00, 4'h0, 4'h0, 8'h01, 8'h01, 8'h26, 3'd4};
 	mode_d = 4'h8;
 	div = 25'd0;
 end

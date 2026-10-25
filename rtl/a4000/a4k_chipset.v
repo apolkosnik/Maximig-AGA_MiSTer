@@ -449,6 +449,7 @@ denise DENISE1
 	.data_in(custom_data_in),
 	.chip48(chip48),
 	.dmald(dmald),
+	.dbr(dbr),
 	.data_out(denise_data_out),
 	.blank(~_hsync|vblank),
 	.red(red),

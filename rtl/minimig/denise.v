@@ -44,6 +44,7 @@ module denise (
   input  wire [ 16-1:0] data_in,        // bus data in
   input  wire [ 48-1:0] chip48,         // big chipram read
   input  wire           dmald,          // a BPLxDAT/SPRxDATx write is bitplane/sprite DMA (not copper/CPU)
+  input  wire           dbr,            // the bus cycle is Agnus's DMA (not the CPU's)
   output wire [ 16-1:0] data_out,       // bus data out
   input  wire           blank,          // blanking input
   output wire [  8-1:0] red,            // red componenent video out
@@ -67,6 +68,7 @@ parameter BPLCON3  = 9'h106;
 parameter BPLCON4  = 9'h10c;
 parameter DENISEID = 9'h07c;
 parameter BPL1DAT  = 9'h110;
+parameter FMODE    = 9'h1fc;
 parameter COLORBASE = 9'h180;
 
 
@@ -323,6 +325,37 @@ wire window_ena = window_d[3];
 
 //--------------------------------------------------------------------------------------
 
+// the chip bus's previous word: what a copper or CPU write to BPLxDAT or
+// SPRxDATx takes as its first 16 bits in FMODE 2/3 (WinUAE wordto64convert,
+// chipset_latch_rw).  Every DMA cycle leaves its word -- the last of a wide
+// bitplane or sprite fetch -- and the CPU's cycles leave it as it is.  Taken
+// at the half cycle the shifters load theirs (chip48 is there by then).
+wire        clk7n_en = c1 & c3;
+reg  [15:0] fmode_r;
+reg  [15:0] bus_prev;
+reg  [15:0] hist_d;
+reg         hist_dma;
+reg   [1:0] hist_fm;   // the fetch's width: FMODE of a bitplane or sprite DMA load, else 0
+always @(posedge clk) begin
+  if (clk7_en) begin
+    if (reset)
+      fmode_r <= 16'h0000;
+    else if (aga && reg_address_in[8:1] == FMODE[8:1])
+      fmode_r <= data_in;
+    hist_d   <= data_in;
+    hist_dma <= dbr;
+    hist_fm  <= !dmald ? 2'b00 :
+                (reg_address_in[8:5] == BPL1DAT[8:5]) ? fmode_r[1:0] :
+                (reg_address_in[8:6] == 3'b101)       ? fmode_r[3:2] : 2'b00;
+  end
+  if (clk7n_en && hist_dma)
+    case (hist_fm)
+      2'b00:   bus_prev <= hist_d;
+      2'b11:   bus_prev <= chip48[15:0];
+      default: bus_prev <= chip48[47:32];
+    endcase
+end
+
 // instantiate bitplane module
 denise_bitplanes bplm0
 (
@@ -335,6 +368,7 @@ denise_bitplanes bplm0
   .reg_address_in(reg_address_in),
   .data_in(data_in),
   .chip48(chip48),
+  .bus_prev(bus_prev),
   .dmald(dmald),
   .hires(hires),
   .shres(shres & ecs),
@@ -392,6 +426,7 @@ denise_sprites sprm0
   .hpos(hpos),
   .data_in(data_in),
   .chip48(chip48),
+  .bus_prev(bus_prev),
   .dmald(dmald),
   .sprena(display_ena | brdsprt),
   .esprm(esprm),

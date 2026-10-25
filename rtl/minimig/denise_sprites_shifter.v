@@ -19,6 +19,7 @@ module denise_sprites_shifter
   input [15:0] fmode,
   input shift,
   input [48-1:0] chip48,
+  input [15:0] bus_prev,       // the chip bus's previous word (Denise)
   input   dbr,               // a data write is sprite DMA (Agnus dmald), not the copper or CPU
   input   [15:0] data_in,     // bus data in
   output  [1:0] sprdata,      // serialized sprite data out
@@ -51,7 +52,7 @@ always @(posedge clk) if (clk7_en) begin data16 <= data_in; dma16 <= dbr; end
 // switch data according to fmode: sprite DMA brings the wide fetch's other
 // words (chip48); a CPU write has only its word (WinUAE, after the AGA
 // notes): 32 wide by FMODE bit 2, both halves the written word; by bit 3
-// (and 64 wide), the first 16 pixels the previous chip bus data, the rest
+// (and 64 wide), the first 16 pixels the previous chip bus word (bus_prev), the rest
 // the written word again
 reg  [64-1:0] spr_fmode_dat;
 
@@ -66,8 +67,8 @@ always @ (*) begin
     case(fmode[3:2])
       2'b00   : spr_fmode_dat = {data16, 48'h000000000000};
       2'b01   : spr_fmode_dat = {data16, data16, 32'h00000000};
-      2'b10   : spr_fmode_dat = {chip48[47:32], data16, 32'h00000000};
-      default : spr_fmode_dat = {chip48[47:32], data16, data16, data16};
+      2'b10   : spr_fmode_dat = {bus_prev, data16, 32'h00000000};
+      default : spr_fmode_dat = {bus_prev, data16, data16, data16};
     endcase
 end
 

@@ -10,6 +10,9 @@
 #   tb_ide, tb_hps  the IDE (ide.v, Budgie, hps_ext) with Main's side
 #             played by the bench (tb/ide/run.sh)
 #   tb_agnus  Agnus/Alice: beam counters, copper, DMA slots (tb/agnus/run.sh)
+#   tb_denise Denise: BPLxDAT/SPRxDATx loads in the wide fetch modes (tb/denise/run.sh)
+#   tb_rtc    the RP5C01: 12/24-hour writes and counts (tb/rtc/run.sh)
+#   tb_rtg    the RTG driver's SetGC/SetPanning on the AP68040 bench (tb/rtg/run.sh)
 #   tb_audio, tb_pot  Paula's audio DMA blocks, the analog pots (tb/paula/run.sh)
 #   tb_memory, tb_card  the local bus, SDRAM (refresh too), DDR3, RTG
 #             registers and CLUT, the A3640 (tb/mem/run.sh)
@@ -53,6 +56,9 @@ if ../ide/run.sh; then :; else fail=1; fi
 if ../mem/run.sh; then :; else fail=1; fi
 if ../paula/run.sh; then :; else fail=1; fi
 if ../agnus/run.sh; then :; else fail=1; fi
+if ../denise/run.sh; then :; else fail=1; fi
+if ../rtc/run.sh; then :; else fail=1; fi
+if ../rtg/run.sh; then :; else fail=1; fi
 
 [ $fail -eq 0 ] && echo "ALL PASSED" || echo "FAILURES"
 exit $fail

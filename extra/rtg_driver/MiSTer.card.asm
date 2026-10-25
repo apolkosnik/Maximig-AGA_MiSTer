@@ -645,12 +645,32 @@ SetPanning:
 ;  these values you will have to calculate the LinearStartingAddress
 ;  fields of the CRTC registers.
 
+; The bitmap may be larger than the mode (a virtual screen): its rows are
+; Width pixels apart, and the view starts XOffset pixels and YOffset rows into
+; it (as WinUAE's picasso_SetPanning).  The offsets go back to the BoardInfo.
+
+        movem.l d2-d4,-(sp)
+        move.w  d1,PSSO_BoardInfo_XOffset(a0)
+        move.w  d2,PSSO_BoardInfo_YOffset(a0)
+        move.w  d1,d3
+        bsr.w   CalculateBytesPerRow    ; d0.w: the bitmap's bytes per row
+        moveq   #0,d4
+        move.w  d0,d4
+        moveq   #1,d0
+        bsr.w   CalculateBytesPerRow    ; d0.w: bytes per pixel
+        muls.w  d0,d3                   ; XOffset * bytes per pixel
+        muls.w  d4,d2                   ; YOffset * bytes per row
+        add.l   d3,d2
         move.l  a1,d0
         sub.l   PSSO_BoardInfo_MemoryBase(a0),d0
+        add.l   d2,d0
         movea.l PSSO_BoardInfo_RegisterBase(a0),a0
         add.l   #FB_BASE,d0
         BUG     "RTG:ADDRESS = %lx",d0
         move.l  d0,REG_ADDRESS(a0)
+        move.w  d4,REG_STRIDE(a0)
+        BUG     "RTG:BytesPerLine = %lx",d4
+        movem.l (sp)+,d2-d4
         rts
         
 ;------------------------------------------------------------------------------

@@ -34,6 +34,7 @@ module denise_bitplanes
   input   [8:1] reg_address_in,   // register address
   input   [15:0] data_in,       // bus data in
   input   [48-1:0] chip48,  // big chipram read
+  input   [15:0] bus_prev,  // the chip bus's previous word (a copper/CPU write in FMODE 2/3)
   input   dmald,           // a BPLxDAT write is bitplane DMA (not the copper or the CPU)
   input   hires,             // high resolution mode select
   input   shres,             // super high resolution mode select
@@ -167,7 +168,7 @@ always @(posedge clk) if (clk7_en) begin data16 <= data_in; dma16 <= dmald; end
 // notes, from hardware tests): DMA at FMODE 0 the word, zeros, the word,
 // zeros; at FMODE 1/2 its 32 bits twice; at FMODE 3 all 64.  A copper or CPU
 // write: FMODE 0 as DMA, FMODE 1 the word four times, FMODE 2/3 the bus's
-// previous word, then the word three times
+// previous word (bus_prev), then the word three times
 reg [63:0] bpl_load;
 always @(*)
   if (dma16)
@@ -181,7 +182,7 @@ always @(*)
     case (fmode[1:0])
       2'b00   : bpl_load = {data16, 16'h0000, data16, 16'h0000};
       2'b01   : bpl_load = {data16, data16, data16, data16};
-      default : bpl_load = {chip48[47:32], data16, data16, data16};
+      default : bpl_load = {bus_prev, data16, data16, data16};
     endcase
 
 //bitplane buffer register for plane 1
