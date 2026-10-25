@@ -347,7 +347,8 @@ wire        extrom_on;           // the chipset: an extension ROM is loaded
 // the PCs of the last 256 instructions retired, frozen at the first sign of
 // a crash once armed: an instruction retired from the vector page
 // ($000002-$0003FF: nothing runs there, a runaway does; exception entry
-// retires at 0), a RESET
+// retires at 0), an instruction from Kickstart's first page ($F80000-
+// $F800FF: its entry, reached without a reset by a runaway), a RESET
 // instruction (Kickstart's ColdReboot after an Alert), a CPU reset, or the
 // CPU halting (a double fault).  It arms after 2^22 instructions (the
 // boot's own resets come before); a4k_lbus copies it to DDR3 at
@@ -373,6 +374,9 @@ always @(posedge clk_cpu) begin
 			if (!rtr_arm) rtr_cnt <= rtr_cnt + 1'd1;
 			// (an exception's entry retires at PC 0: not a runaway)
 			else if (dbg_pc[31:10] == 22'd0 && dbg_pc[9:0] != 10'd0) rtr_frz <= 1'b1;
+			// (Kickstart's entry, $F800D0-$F800D2, reached by a jump rather
+			// than a reset: a runaway into a cold start)
+			else if (dbg_pc[31:8] == 24'h00F800) rtr_frz <= 1'b1;
 		end
 	end
 end
