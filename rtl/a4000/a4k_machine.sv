@@ -344,28 +344,34 @@ wire        ovl;
 wire        extrom_on;           // the chipset: an extension ROM is loaded
 
 // The retired-PC ring, a debug aid with the PC sampler (MAXIMIG_PCSAMPLE):
-// the PCs of the last 256 instructions retired, frozen at the first one
-// retired from $000000-$0003FF (the vector page: nothing runs there, a
-// runaway does) once one has retired elsewhere since the last reset (the
-// reset's own entry retires at 0); a4k_lbus copies it to DDR3 at
+// the PCs of the last 256 instructions retired, frozen at the first sign of
+// a crash once armed: an instruction retired from the vector page
+// ($000000-$0003FF: nothing runs there, a runaway does), a RESET
+// instruction (Kickstart's ColdReboot after an Alert), a CPU reset, or the
+// CPU halting (a double fault).  It arms after 2^22 instructions (the
+// boot's own resets come before); a4k_lbus copies it to DDR3 at
 // 0x27FF6400.
 wire [31:0] rtr_rd;
 wire  [7:0] rtr_ra;
 reg   [7:0] rtr_wp = 8'd0;
 reg         rtr_frz = 1'b0;
-reg         rtr_arm = 1'b0;
+`ifndef MAXIMIG_RTR_ARM_BITS
+`define MAXIMIG_RTR_ARM_BITS 22      // (the system bench: fewer)
+`endif
+reg  [`MAXIMIG_RTR_ARM_BITS:0] rtr_cnt = '0;
+wire        rtr_arm = rtr_cnt[`MAXIMIG_RTR_ARM_BITS];
 `ifdef MAXIMIG_PCSAMPLE
 reg  [31:0] rtr_ram [256];
 reg  [31:0] rtr_q;
 always @(posedge clk_cpu) begin
-	// a reset (the core's own, after the ROM is loaded) disarms: its entry
-	// retires at 0
-	if (!cpu_rsti_n) rtr_arm <= 1'b0;
-	else if (dbg_retire && !rtr_frz) begin
-		rtr_ram[rtr_wp] <= dbg_pc;
-		rtr_wp <= rtr_wp + 1'd1;
-		if (dbg_pc[31:10] != 22'd0) rtr_arm <= 1'b1;
-		else if (rtr_arm)           rtr_frz <= 1'b1;
+	if (!rtr_frz) begin
+		if (rtr_arm && (!cpu_rsti_n || !cpu_rsto_n || dbg_halted)) rtr_frz <= 1'b1;
+		else if (dbg_retire) begin
+			rtr_ram[rtr_wp] <= dbg_pc;
+			rtr_wp <= rtr_wp + 1'd1;
+			if (!rtr_arm) rtr_cnt <= rtr_cnt + 1'd1;
+			else if (dbg_pc[31:10] == 22'd0) rtr_frz <= 1'b1;
+		end
 	end
 end
 always @(posedge clk_57) rtr_q <= rtr_ram[rtr_ra];
