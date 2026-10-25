@@ -1,0 +1,133 @@
+From 49480fb2b29320c408741643ed98daa2eb45daf7 Mon Sep 17 00:00:00 2001
+From: Adam Polkosnik <apolkosnik@gmail.com>
+Date: Sun, 25 Oct 2026 15:22:36 -0400
+Subject: [PATCH 2/2] Maximig: choose the cartridge, HRTmon or the Action
+ Replay
+
+The Maximig System menu's HRTmon item becomes "Cartridge: Off / HRTmon /
+Action Replay".  The Action Replay is AR5's DeMoN v2 build: AR5.ROM (ROM
+and RAM image, up to 512 KB) goes to $A80000 in place of HRTMON.ROM, with
+no configuration block.  The choice is kept in the config, in ext_cfg bit 21
+(the core's status bit 53), and sent to the core with the CPU halted,
+before the image, at the next reset.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ menu.cpp                           | 28 ++++++++++++++++++++++++----
+ support/minimig/minimig_config.cpp | 23 +++++++++++++++++++++++
+ support/minimig/minimig_config.h   |  5 +++++
+ 3 files changed, 52 insertions(+), 4 deletions(-)
+
+diff --git a/menu.cpp b/menu.cpp
+index 4a1f076..7e79f4e 100644
+--- a/menu.cpp
++++ b/menu.cpp
+@@ -6690,7 +6690,7 @@ void HandleUI(void)
+ 				fastcfg ? config_memory_fast_msg[(minimig_config.cpu>>1) & 1][fastcfg] : "",
+ 				((minimig_config.memory >> 2) & 0x03) ? "+" : "",
+ 				((minimig_config.memory >> 2) & 0x03) ? config_memory_slow_msg[(minimig_config.memory >> 2) & 0x03] : "",
+-				(minimig_config.memory & 0x40) ? " HRT" : ""
++				(minimig_config.memory & 0x40) ? ((is_maximig() && (minimig_get_extcfg() & MAXIMIG_EXTCFG_AR)) ? " AR" : " HRT") : ""
+ 			);
+ 
+ 			char *p = strrchr(minimig_config.kickstart, '/');
+@@ -6859,8 +6859,18 @@ void HandleUI(void)
+ 			}
+ 		}
+ 		OsdWrite(m++, s, menusub == 7, 0);
+-		strcpy(s, " HRTmon   : ");
+-		strcat(s, (minimig_config.memory & 0x40) ? "Enabled" : "Disabled");
++		if (is_maximig())
++		{
++			// the cartridge: HRTmon or the Action Replay (AR5, DeMoN v2)
++			strcpy(s, " Cartridge: ");
++			strcat(s, !(minimig_config.memory & 0x40) ? "Off" :
++				(minimig_get_extcfg() & MAXIMIG_EXTCFG_AR) ? "Action Replay" : "HRTmon");
++		}
++		else
++		{
++			strcpy(s, " HRTmon   : ");
++			strcat(s, (minimig_config.memory & 0x40) ? "Enabled" : "Disabled");
++		}
+ 		OsdWrite(m++, s, menusub == 8, 0);
+ 
+ 		OsdWrite(m++, "", 0, 0);
+@@ -7040,7 +7050,17 @@ void HandleUI(void)
+ 			}
+ 			else if (menusub == 8)
+ 			{
+-				minimig_config.memory ^= 0x40;
++				if (is_maximig())
++				{
++					// Off -> HRTmon -> Action Replay -> Off; kept in the config and
++					// sent to the core at the next reset, with the cartridge's image
++					int c = !(minimig_config.memory & 0x40) ? 0 : (minimig_get_extcfg() & MAXIMIG_EXTCFG_AR) ? 2 : 1;
++					c = (c + (minus ? 2 : 1)) % 3;
++					minimig_config.memory = (minimig_config.memory & ~0x40) | (c ? 0x40 : 0);
++					if (c == 2) minimig_config.ext_cfg2 |= MAXIMIG_EXTCFG_AR >> 16;
++					else minimig_config.ext_cfg2 &= ~(MAXIMIG_EXTCFG_AR >> 16);
++				}
++				else minimig_config.memory ^= 0x40;
+ 				menustate = MENU_MINIMIG_CHIPSET1;
+ 			}
+ 			else if (menusub == 10)
+diff --git a/support/minimig/minimig_config.cpp b/support/minimig/minimig_config.cpp
+index d2ed55e..b47b935 100644
+--- a/support/minimig/minimig_config.cpp
++++ b/support/minimig/minimig_config.cpp
+@@ -292,6 +292,26 @@ static char UploadKickstart(char *name)
+ static char UploadActionReplay()
+ {
+ 	fileTYPE file = {};
++	if (is_maximig() && (minimig_get_extcfg() & MAXIMIG_EXTCFG_AR))
++	{
++		// the Action Replay: AR5's DeMoN v2 build, its ROM ($A80000) and RAM
++		// ($AC0000) image, 512 KB at most; it takes no configuration
++		if (FileOpen(&file, user_io_make_filepath(HomeDir(), "AR5.ROM")) || FileOpen(&file, "AR5.ROM"))
++		{
++			if (file.size > 0x80000)
++			{
++				printf("\nAR5.ROM is larger than 512 KB!\n");
++				FileClose(&file);
++				return(0);
++			}
++			puts("Uploading Action Replay ROM... ");
++			SendFileV2(&file, NULL, 0, 0xa80000, (file.size + 511) >> 9);
++			FileClose(&file);
++			return(1);
++		}
++		puts("\nAR5.ROM not found!\n");
++		return(0);
++	}
+ 	if(FileOpen(&file, user_io_make_filepath(HomeDir(), "HRTMON.ROM")) || FileOpen(&file, "HRTMON.ROM"))
+ 	{
+ 		int adr, data;
+@@ -470,6 +490,9 @@ static void ApplyConfiguration(char reloadkickstart)
+ 	minimig_ConfigFloppy(minimig_config.floppy.drives, minimig_config.floppy.speed);
+ 	minimig_ConfigFloppyExt(minimig_config.externalfloppy.exDrives[0], minimig_config.externalfloppy.exDrives[1], minimig_config.externalfloppy.exDrives[2], minimig_config.externalfloppy.exDrives[3]);
+ 
++	// Maximig: the cartridge's type before its image goes up, while the CPU
++	// is halted
++	if (is_maximig()) minimig_set_extcfg(minimig_get_extcfg() & ~1);
+ 	if (minimig_config.memory & 0x40) UploadActionReplay();
+ 
+ 	if (reloadkickstart)
+diff --git a/support/minimig/minimig_config.h b/support/minimig/minimig_config.h
+index e5ad826..5a30de8 100644
+--- a/support/minimig/minimig_config.h
++++ b/support/minimig/minimig_config.h
+@@ -12,6 +12,11 @@
+ #define CONFIG_AGA       16
+ #define CONFIG_CDTV      32
+ 
++// Maximig: the cartridge is the Action Replay (AR5.ROM, DeMoN v2 at
++// $A80000), not HRTmon, when it is enabled (memory bit 6): the core's
++// status bit 53
++#define MAXIMIG_EXTCFG_AR 0x200000
++
+ #define CONFIG_FLOPPY1X  0
+ #define CONFIG_FLOPPY2X  1
+ 
+-- 
+2.56.0
+

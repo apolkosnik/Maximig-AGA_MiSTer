@@ -34,6 +34,10 @@ module a4k_chipset
 	output        _cpu_reset,     // to the CPU: the system reset
 	input         _cpu_reset_in,  // from the CPU: RSTO, the RESET instruction
 	input         iack7_t,        // from the card: toggles at a level-7 interrupt acknowledge
+	input         cart_ar,        // the cartridge is the Action Replay (Main's setting)
+	output        cart_ar_on,     // ... and the cartridge is enabled
+	output reg    freeze_t = 1'b0,// to the local bus: toggles at the freeze key
+	input         nmi_t,          // from the local bus: toggles to raise the cartridge's NMI
 
 	// chip RAM (SDRAM chip port, through a4k_sdram)
 	output [15:0] ram_data,
@@ -186,7 +190,12 @@ wire        dbs = a[23:21] == 3'b000 || a[23:20] == 4'hC || a[23:16] == 8'hDF;
 // once the cartridge is out of stealth (a4k_lbus), so no stealth gate here
 wire        sel_cart = !dbr && a[23:19] == 5'b10100;                  // $A00000-$A7FFFF
 wire        sel_cmirror = !dbr && cpu_rd && a[23:12] == 12'hA9F;       // $A9F000-$A9FFFF
-wire        ram_sel = dbr | sel_chip | sel_kick | sel_ext | sel_cart;
+// the Action Replay: the HPS uploads AR5.ROM (ROM and RAM) to $A80000 with
+// the CPU halted; the CPU reaches it from the local bus, except for the
+// custom register snapshot at $ACF000-$ACF1FF (below)
+wire        sel_ar   = !dbr && cpuhlt && a[23:19] == 5'b10101;          // $A80000-$AFFFFF
+wire        sel_arsnap = !dbr && cart_ar_on && a[23:9] == 15'h5678;     // $ACF000-$ACF1FF
+wire        ram_sel = dbr | sel_chip | sel_kick | sel_ext | sel_cart | sel_ar;
 
 // Main uploads an extension ROM (or a 1 MB Kickstart's first half) to
 // $E00000 with the CPU halted, after halting it for the reload: the local
@@ -563,24 +572,54 @@ minimig_m68k_bridge CPU1
 	.host_ack (host_ack)
 );
 
-// the cartridge's NMI: the freeze key (CIA-A, HRTmon enabled) raises level
-// 7 until the card acknowledges it
+// the cartridge's NMI: the freeze key (CIA-A, the cartridge enabled) goes
+// to the local bus, which decides when the cartridge freezes (a4k_lbus);
+// its toggle raises level 7 until the card acknowledges it
+assign      cart_ar_on = memory_config[6] & cart_ar;
 reg         freeze_d = 1'b0, int7 = 1'b0;
 reg   [2:0] iack7_s = 3'd0;
+reg   [2:0] nmi_s = 3'd0;
 always @(posedge clk) begin
 	iack7_s <= {iack7_s[1:0], iack7_t};
+	nmi_s   <= {nmi_s[1:0], nmi_t};
 	if (clk7_en) freeze_d <= freeze;
+	if (clk7_en && freeze && !freeze_d) freeze_t <= ~freeze_t;
 	if (reset)                          int7 <= 1'b0;
-	else if (clk7_en && freeze && !freeze_d) int7 <= 1'b1;
+	else if (nmi_s[2] != nmi_s[1])      int7 <= 1'b1;
 	else if (iack7_s[2] != iack7_s[1])  int7 <= 1'b0;
 end
 
-// the custom registers as last written, for HRTmon to read at $A9F000
+// the custom registers as last written, for HRTmon to read at $A9F000;
+// at an Action Replay freeze copied to its snapshot (WinUAE: ar_custom to
+// the AR's RAM at $F000), which the CPU reads and writes as RAM
 reg  [15:0] cmirror [0:255];
 reg  [15:0] cmirror_q;
+reg   [7:0] snap_h [0:255];
+reg   [7:0] snap_l [0:255];
+reg  [15:0] snap_q;
+reg         cpy_run = 1'b0, cpy_wr = 1'b0;
+reg   [7:0] cpy_a = 8'd0, cpy_wa = 8'd0;
+wire  [7:0] snap_wa = cpy_wr ? cpy_wa : a[8:1];
+wire        snap_wh = cpy_wr || (sel_arsnap && cpu_hwr);
+wire        snap_wl = cpy_wr || (sel_arsnap && cpu_lwr);
+wire [15:0] snap_wd = cpy_wr ? cmirror_q : cpu_data_out;
 always @(posedge clk) begin
 	if (clk7_en) cmirror[reg_address] <= custom_data_in;
-	cmirror_q <= cmirror[a[8:1]];
+	cmirror_q <= cmirror[cpy_run ? cpy_a : a[8:1]];
+	// the copy: an entry a clock, its read a clock ahead of its write
+	if (cart_ar_on && nmi_s[2] != nmi_s[1]) begin
+		cpy_run <= 1'b1;
+		cpy_a   <= 8'd0;
+	end
+	else if (cpy_run) begin
+		cpy_a <= cpy_a + 1'd1;
+		if (cpy_a == 8'd255) cpy_run <= 1'b0;
+	end
+	cpy_wr <= cpy_run;
+	cpy_wa <= cpy_a;
+	if (snap_wh) snap_h[snap_wa] <= snap_wd[15:8];
+	if (snap_wl) snap_l[snap_wa] <= snap_wd[7:0];
+	snap_q <= {snap_h[a[8:1]], snap_l[a[8:1]]};
 end
 
 assign _cpu_ipl = int7 ? 3'b000 : _iplx;
@@ -598,7 +637,8 @@ assign ram_data_in    = dbr ? custom_data_out : cpu_data_out;
 // them): AGA writes 0 there, which leaves INTENA, INTREQ, DMACON, ADKCON as
 // they are (WinUAE custom_wget_1, write-only registers)
 assign custom_data_in = dbr ? ram_data_out : cpu_rd ? 16'h0000 : cpu_data_out;
-assign gary_data_out  = dbr ? 16'h0000 : custom_data_out | ram_data_out | (sel_cmirror ? cmirror_q : 16'h0000);
+assign gary_data_out  = dbr ? 16'h0000 : custom_data_out | ram_data_out | (sel_cmirror ? cmirror_q : 16'h0000) |
+                        (sel_arsnap && cpu_rd ? snap_q : 16'h0000);
 assign ram_rd         = dbr ? ~dbwe : cpu_rd;
 assign ram_hwr        = dbr ?  dbwe : cpu_hwr;
 assign ram_lwr        = dbr ?  dbwe : cpu_lwr;
@@ -608,6 +648,7 @@ assign ram_address = dbr      ? {4'b0000, dma_address_out[20:1]} :
                      sel_kick ? {6'b001111, a[18:1]} :
                      sel_ext  ? {6'b001110, a[18:1]} :
                      sel_cart ? {6'b001101, a[18:1]} :
+                     sel_ar   ? {6'b001100, a[18:1]} :
                                 {4'b0000, a[20:1]};
 
 // the sram bridge's strobes (minimig_sram_bridge)

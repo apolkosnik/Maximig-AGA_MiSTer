@@ -85,6 +85,7 @@ read/write, write data.  The decoder (Fat Gary's role) selects a target:
 | `$00000000-$001FFFFF` | chip RAM (ROM for reads while OVL) | Budgie -> chip bus, 32 bit, cacheable |
 | `$00200000-$009FFFFF` | Zorro II memory space | Buster (no boards: the cycle floats) |
 | `$00A00000-$00B7FFFF` | Zorro II I/O space | Buster (no boards: the cycle floats), TCI |
+| `$00A00000-$00AFFFFF` | the freeze cartridge, hidden until it freezes the machine: HRTmon (RAM at `$A00000`, register mirror at `$A9F000`) or the Action Replay (ROM `$A80000`, RAM `$AC0000`, register snapshot `$ACF000`) | SDRAM / Budgie, TCI |
 | `$00BFD000/$00BFE001` | CIA-B / CIA-A | Budgie, E-clock synchronised, TCI |
 | `$00C00000-$00CFFFFF` | chip register mirror (Fat Gary) | Budgie, TCI |
 | `$00DC0000-$00DCFFFF` | RP5C01 real-time clock | I/O bus, TCI |
@@ -184,6 +185,9 @@ III cycles take Buster's FCS/DTACK cycle plus the board's own wait states
 | SDRAM (16-bit, `clk_114`) | contents |
 |---|---|
 | `0x0000000-0x01FFFFF` | chip RAM, 2 MB |
+| `0x0600000-0x067FFFF` | the Action Replay cartridge (AR5.ROM, DeMoN v2 layout): ROM at `$A80000`, RAM at `$AC0000` |
+| `0x0680000-0x06FFFFF` | the HRTmon cartridge's RAM, `$A00000-$A7FFFF` (HRTMON.ROM at `$A10000`) |
+| `0x0700000-0x077FFFF` | extension ROM (`$E00000`, shown at `$F00000` too) |
 | `0x0780000-0x07FFFFF` | Kickstart ROM, 512 KB (written by the HPS through the chip bus with the CPU halted, as on Minimig) |
 | `0x1000000-0x1FFFFFF` | motherboard fast RAM, up to 16 MB |
 

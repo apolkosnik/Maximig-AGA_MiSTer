@@ -23,6 +23,7 @@ module tb_top
 	input       [7:0] kbd_mouse_data,
 	input       [1:0] kbd_mouse_type,
 	input             kbd_mouse_level,
+	input             cart_ar,       // the cartridge: the Action Replay, not HRTmon
 
 	// video
 	output            hs_n,
@@ -139,6 +140,7 @@ a4k_machine machine
 	.toccata_l        (),
 	.toccata_r        (),
 	.dsnd_volume      (2'd0),
+	.cart_ar          (cart_ar),
 	.dsnd_l           (),
 	.dsnd_r           (),
 

@@ -62,6 +62,9 @@ module a4k_lbus
 	input             ovl,           // CIA-A OVL: ROM at $000000 for reads
 	input             extrom_on,     // an extension ROM is loaded: shown at $F00000 too
 	input             iack7_t,       // the card: toggles at a level-7 interrupt acknowledge
+	input             cart_ar,       // the cartridge is the Action Replay (DeMoN v2), not HRTmon
+	input             freeze_t,      // the chipset: toggles at the freeze key (cartridge enabled)
+	output reg        nmi_t = 1'b0,  // to the chipset: toggles to raise the cartridge's NMI
 	input      [31:0] dbg_pc,        // the CPU's PC, for the PC sampler
 	input             rtr_frz,       // the retired-PC ring has frozen (CPU clock)
 	input       [7:0] rtr_wp,        // ... its next slot: the oldest entry
@@ -166,7 +169,8 @@ localparam [4:0]
 	T_FLOAT  = 5'd20,  // nothing answers where Gary does not time out: floats
 	T_NMIV   = 5'd21,  // the HRTmon cartridge's NMI vector
 	T_CART   = 5'd22,  // SDRAM: the HRTmon cartridge's RAM
-	T_GIEN   = 5'd23;  // Gary's interrupt enable ($DF8000-$DFBFFF)
+	T_GIEN   = 5'd23,  // Gary's interrupt enable ($DF8000-$DFBFFF)
+	T_AR     = 5'd24;  // SDRAM: the Action Replay's ROM and RAM
 
 // slow bus target numbers (a4k_budgie)
 localparam [2:0] SB_CHIP = 3'd0, SB_CREG = 3'd1, SB_CIA = 3'd2, SB_RTC = 3'd3,
@@ -200,6 +204,31 @@ endfunction
 reg        cart_on = 1'b0;
 reg        nmi_arm = 1'b0;
 
+// the Action Replay (AR5's DeMoN v2 build, cart_ar): ROM at $A80000-$ABFFFF,
+// RAM at $AC0000-$AFFFFF, both in the SDRAM at 0x600000 (the HPS uploads
+// AR5.ROM there with the CPU halted).  The cartridge is hidden until it
+// freezes the machine, as WinUAE's AR2/AR3 (ar.cpp) and AR5 expect:
+// * the freeze key; with mode bit 1 a read of CIA-A PRA ($BFE001), with
+//   mode bit 0 a write of CIA-B PRB ($BFD100) -- only while hidden;
+// * a system reset: the first CPU write of a word or long word to chip RAM
+//   after it (Kickstart's first), cause 3.
+// A freeze shows the cartridge and raises level 7; the NMI vector is the
+// ROM's ($A8007C), served for the vector fetch as HRTmon's.  The ROM's first
+// long word is the control register: a write of the byte at +1 sets the
+// mode and clears the cause, and the cartridge hides at the first
+// instruction fetched from outside it (WinUAE: once the PC leaves the ROM
+// and RAM); a read of the byte at +1 or +3 has the cause in D1-D0 (0 the
+// key, 1 PRA read, 2 PRB write, 3 reset).  The custom registers as they
+// were at the freeze are at $ACF000-$ACF1FF (the chipset's snapshot, read
+// and written as RAM there).  Other ROM writes are ignored.
+reg        ar_vis = 1'b0;      // shown: from the freeze until it hides
+reg        ar_hide = 1'b0;     // the control register written: hide at the next fetch from outside
+reg        ar_rst = 1'b0;      // a system reset: freeze at the first chip RAM write
+reg  [1:0] ar_mode = 2'b00;    // bit 1: freeze at a PRA read, bit 0: at a PRB write
+reg  [1:0] ar_cause = 2'b00;
+reg        ar_vec = 1'b0;      // the beat is the NMI vector fetch, from the ROM
+reg        ar_crd = 1'b0;      // the beat reads the control register
+
 reg [4:0] dec;
 always @(*) begin
 	logic [31:0] a;
@@ -220,7 +249,8 @@ always @(*) begin
 			// the cartridge: its RAM ($A00000-$A7FFFF) straight from SDRAM, where
 			// it lives, so HRTmon runs at the CPU's speed; the custom register
 			// mirror ($A9F000) on the chip bus
-			8'hA?:        dec = !cart_on ? T_FLOAT : (a[23:19] == 5'b10100) ? T_CART : T_CREG;
+			8'hA?:        dec = cart_ar ? ((ar_vis && a[23:19] == 5'b10101) ? ((a[23:9] == 15'h5678) ? T_CREG : T_AR) : T_FLOAT) :
+			                    !cart_on ? T_FLOAT : (a[23:19] == 5'b10100) ? T_CART : T_CREG;
 			8'hC?:        dec = T_CREG;                                              // Fat Gary's mirror
 			8'hDC:        dec = T_RTC;
 			8'hDD:        dec = (a[15:13] == 3'b001) ? T_IDE : (a[15:13] == 3'b010) ? T_SHARE : T_NONE;
@@ -405,6 +435,8 @@ reg[127:0] ddb_d;
 
 wire [24:2] sd_byte = (dec == T_ROM)  ? {5'b00111, lb_addr[23:19] != 5'b11100 && lb_addr[23:19] != 5'b11110, lb_addr[18:2]}  // 0x780000 (0x700000: $E00000, $F00000) + offset
                    : (dec == T_CART) ? {6'b001101, lb_addr[18:2]}                // 0x680000 + offset
+                   : (dec == T_AR)   ? {6'b001100, lb_addr[18:2]}                // 0x600000 + offset
+                   : ar_vec          ? {6'b001100, 17'h0001F}                    // 0x60007C: the AR's NMI vector
                                      : {1'b1, lb_addr[23:2]};                   // 0x1000000 + offset
 reg  [28:2] dd_byte;
 always @(*) begin
@@ -461,17 +493,60 @@ always @(posedge clk) begin
 end
 
 reg iack7_d = 1'b0;
+reg [2:0] freeze_s = 3'd0;
+wire      ar_idle = cart_ar && !ar_vis && !ar_rst;
+wire      ar_cia  = beat_new && dec == T_CIA && lb_addr[11:8] == 4'd0 && lb_addr[15:12] == 4'hE && !lb_we &&
+                    (lb_be[2] || lb_be[0]) && ar_mode[1];                                  // $BFE001 read
+wire      ar_cib  = beat_new && dec == T_CIA && lb_addr[11:8] == 4'd1 && lb_addr[15:12] == 4'hD && lb_we &&
+                    (lb_be[3] || lb_be[1]) && ar_mode[0];                                  // $BFD100 write
+wire      ar_chw  = beat_new && dec == T_CHIP && lb_we && lb_be != 4'b1000 && lb_be != 4'b0100 &&
+                    lb_be != 4'b0010 && lb_be != 4'b0001;                                  // a word or long word to chip RAM
+wire      ar_ctl  = beat_new && dec == T_AR && lb_addr[18:2] == 17'd0;                     // the control register
 always @(posedge clk) begin
-	iack7_d <= iack7_t;
+	iack7_d  <= iack7_t;
+	freeze_s <= {freeze_s[1:0], freeze_t};
 	if (reset) begin
 		cart_on <= 1'b0;
 		nmi_arm <= 1'b0;
 	end
 	else if (iack7_t != iack7_d) begin
-		cart_on <= 1'b1;
+		cart_on <= !cart_ar;
 		nmi_arm <= 1'b1;
 	end
 	else if (beat_new && dec == T_NMIV) nmi_arm <= 1'b0;
+
+	// the freezes
+	if (reset) begin
+		ar_vis  <= 1'b0;
+		ar_hide <= 1'b0;
+		ar_rst  <= 1'b1;
+		ar_mode <= 2'b00;
+	end
+	else if (!cart_ar) begin
+		ar_rst <= 1'b0;
+		if (freeze_s[2] != freeze_s[1]) nmi_t <= ~nmi_t;
+	end
+	else if (ar_rst && ar_chw) begin
+		ar_rst   <= 1'b0;
+		ar_vis   <= 1'b1;
+		ar_cause <= 2'd3;
+		nmi_t    <= ~nmi_t;
+	end
+	else if (ar_idle && (ar_cia || ar_cib || freeze_s[2] != freeze_s[1])) begin
+		ar_vis   <= 1'b1;
+		ar_cause <= ar_cia ? 2'd1 : ar_cib ? 2'd2 : 2'd0;
+		nmi_t    <= ~nmi_t;
+	end
+	else if (ar_ctl && lb_we && lb_be[2]) begin
+		ar_mode  <= lb_wdata[17:16];
+		ar_cause <= 2'd0;
+		ar_hide  <= 1'b1;
+	end
+	else if (ar_hide && beat_new && lb_tt == 2'b00 && (lb_tm == 3'd2 || lb_tm == 3'd6) &&
+	         !(lb_addr[31:24] == 8'h00 && lb_addr[23:19] == 5'b10101)) begin
+		ar_vis  <= 1'b0;
+		ar_hide <= 1'b0;
+	end
 	if (iack7_t != iack7_d) pcs_ack <= pcs_ack + 1'd1;
 	if (beat_new && dec == T_NMIV) pcs_nmi <= pcs_nmi + 1'd1;
 end
@@ -594,6 +669,8 @@ always @(posedge clk) begin
 		end
 		else if (beat_new) begin
 			dbg_tgt <= dec;
+			ar_vec  <= 1'b0;
+			ar_crd  <= ar_ctl && !lb_we;
 			elapsed <= 6'd0;
 			berr    <= 1'b0;
 			rdata   <= 32'hFFFFFFFF;
@@ -615,10 +692,10 @@ always @(posedge clk) begin
 					need     <= 6'd0;
 					st       <= S_PORT;
 				end
-				T_ROM, T_MBRAM, T_CART: begin
+				T_ROM, T_MBRAM, T_CART, T_AR: begin
 					if (dec == T_ROM)
 						need <= fast ? 6'd0 : {4'd0, rom_speed} + 6'd5;
-					else if (dec == T_CART)
+					else if (dec == T_CART || dec == T_AR)
 						need <= fast ? 6'd0 : 6'd5;
 					else begin
 						// Ramsey: wait out a refresh, then the access
@@ -631,7 +708,7 @@ always @(posedge clk) begin
 						else acc = ramsey_cfg[4] ? 6'd4 : 6'd5;
 						need <= fast ? 6'd0 : acc + {3'd0, rf_busy_eff};
 					end
-					if (dec == T_ROM && lb_we) begin
+					if ((dec == T_ROM || (dec == T_AR && !lb_addr[18])) && lb_we) begin
 						// the ROM ignores writes
 						st <= S_WAIT;
 					end
@@ -706,9 +783,11 @@ always @(posedge clk) begin
 					st   <= S_WAIT;
 				end
 				T_NMIV: begin
-					rdata <= 32'h00A1000C;
-					need  <= fast ? 6'd0 : CYC_REG;
-					st    <= S_WAIT;
+					// HRTmon's entry, or the Action Replay ROM's vector
+					rdata  <= 32'h00A1000C;
+					need   <= fast ? 6'd0 : cart_ar ? 6'd5 : CYC_REG;
+					ar_vec <= cart_ar;
+					st     <= cart_ar ? S_SDQ : S_WAIT;
 				end
 				default: begin
 					// nothing decodes the address: Gary's timeout
@@ -740,8 +819,10 @@ always @(posedge clk) begin
 		end
 
 		S_SDR: if (!sd_busy) begin
-			// the quad word is here
-			rdata <= q_long(sd_rdata, sd_byte[2]);
+			// the quad word is here; the AR's control register reads the
+			// freeze cause in D1-D0 of its odd bytes
+			rdata <= ar_crd ? ((q_long(sd_rdata, sd_byte[2]) & 32'hFFFCFFFC) | {14'd0, ar_cause, 14'd0, ar_cause})
+			                : q_long(sd_rdata, sd_byte[2]);
 			if (lb_line) begin
 				sdb_a             <= sd_byte[24:4];
 				sdb_v[sd_byte[3]] <= 1'b1;

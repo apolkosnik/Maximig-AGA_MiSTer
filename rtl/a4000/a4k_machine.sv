@@ -93,6 +93,7 @@ module a4k_machine
 	output     [15:0] toccata_l,
 	output     [15:0] toccata_r,
 	input       [1:0] dsnd_volume,
+	input             cart_ar,       // the cartridge: 0 HRTmon, 1 the Action Replay (AR5, DeMoN v2)
 	output     [15:0] dsnd_l,
 	output     [15:0] dsnd_r,
 
@@ -205,6 +206,9 @@ assign dbg_cpu_ce = cpu_ce;
 wire        sys_rst_n;          // the system reset (the chipset's _cpu_reset)
 wire        cpu_rsto_n;         // the RESET instruction
 wire        iack7_t;            // the card: toggles at a level-7 interrupt acknowledge
+wire        freeze_t;           // the chipset: toggles at the freeze key
+wire        cart_nmi_t;         // the local bus: toggles to raise the cartridge's NMI
+wire        cart_ar_on;         // the chipset: the Action Replay is the enabled cartridge
 wire  [2:0] cpu_ipl_n;
 wire        gary_ien;           // Gary's interrupt master (a4k_lbus)
 
@@ -424,6 +428,9 @@ a4k_lbus lbus
 	.extrom_on(extrom_on),
 	.gary_ien(gary_ien),
 	.iack7_t(iack7_t),
+	.cart_ar(cart_ar_on),
+	.freeze_t(freeze_t),
+	.nmi_t(cart_nmi_t),
 	.dbg_pc(dbg_pc),
 	.rtr_frz(rtr_frz),
 	.rtr_wp(rtr_wp),
@@ -847,6 +854,10 @@ a4k_chipset chipset
 	._cpu_reset   (sys_rst_n        ),
 	._cpu_reset_in(cpu_rsto_n       ),
 	.iack7_t      (iack7_t          ),
+	.cart_ar      (cart_ar          ),
+	.cart_ar_on   (cart_ar_on       ),
+	.freeze_t     (freeze_t         ),
+	.nmi_t        (cart_nmi_t       ),
 
 	.ram_data     (ram_data         ),
 	.ramdata_in   (ramdata_in       ),

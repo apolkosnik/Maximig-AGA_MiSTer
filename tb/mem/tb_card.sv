@@ -14,7 +14,7 @@ wire[31:0] rd; wire berr,ci;
 wire sq,sa,sw; wire[24:2] sad; wire[3:0] sb; wire[31:0] swd;wire[63:0] srd;
 wire dq,da,dw;wire[28:2] dad;wire[3:0] db;wire[31:0] dwd;wire[127:0] drd;
 a4k_lbus lb(.clk(clk),.ce(ce),.reset(reset),.io_reset(reset),.pwrup(reset),.fast(fast),.mbram(2'd3),
- .z3ram256_fit(1'b1),.z3ram128_fit(1'b1),.rtg_fit(1'b1),.a2065_fit(1'b0),.toccata_fit(1'b0),.rom_speed(2'd0),.ovl(ovl),.extrom_on(1'b1),.iack7_t(1'b0),.dbg_pc(32'h1234),
+ .z3ram256_fit(1'b1),.z3ram128_fit(1'b1),.rtg_fit(1'b1),.a2065_fit(1'b0),.toccata_fit(1'b0),.rom_speed(2'd0),.ovl(ovl),.extrom_on(1'b1),.iack7_t(1'b0),.cart_ar(1'b0),.freeze_t(1'b0),.nmi_t(),.dbg_pc(32'h1234),
  .lb_req(req),.lb_ack(ack),.lb_addr(addr),.lb_be(be),.lb_we(we),.lb_wdata(wd),.lb_line(line),.lb_beat(beat),.lb_tt(2'd0),.lb_tm(3'd5),.lb_rdata(rd),.lb_berr(berr),.lb_ci(ci),
  .sd_req(sq),.sd_ack(sa),.sd_addr(sad),.sd_we(sw),.sd_be(sb),.sd_wdata(swd),.sd_rdata(srd),
  .dd_req(dq),.dd_ack(da),.dd_addr(dad),.dd_we(dw),.dd_be(db),.dd_wdata(dwd),.dd_rdata(drd),.sb_ack(1'b0),.sb_rdata(32'd0),.rtg_pal_dr(24'd0));

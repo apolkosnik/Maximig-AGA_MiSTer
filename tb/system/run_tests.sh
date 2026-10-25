@@ -5,6 +5,9 @@
 #             ROM reports PASS/FAIL through the mailbox
 #   t_chipset Denise, the CIAs: behaviour the board test does not reach
 #   t_hrtmon_mmu  HRTmon's NMI entry with the vector table MMU-translated
+#   t_ar      the Action Replay cartridge (AR5's DeMoN v2 layout): its freezes
+#             (reset, CIA traps, the key), control register, register
+#             snapshot and stealth
 #   t_timing  Copperline's accelprobe rows against the real A4000/A3640
 #             (timing_check.py)
 #   tb_ide, tb_hps  the IDE (ide.v, Budgie, hps_ext) with Main's side
@@ -26,7 +29,7 @@ set -e
 cd "$(dirname "$0")"
 OBJ=${OBJ:-obj_tests}
 OBJ=$OBJ ./build.sh > build_tests.log 2>&1 || { tail -30 build_tests.log; exit 1; }
-../asm/build.sh t_board t_timing hrtmon_stub t_hrtmon_mmu extrom_pattern t_chipset > /dev/null
+../asm/build.sh t_board t_timing hrtmon_stub t_hrtmon_mmu extrom_pattern t_chipset t_ar ar_stub > /dev/null
 
 fail=0
 out=$(timeout 1800 ./$OBJ/Vtb_top --rom ../asm/build/t_board.rom --cart ../asm/build/hrtmon_stub.bin --extrom ../asm/build/extrom_pattern.bin --ms 400 --quiet 2>&1) || true
@@ -42,6 +45,9 @@ if echo "$out" | grep -q '^\[mailbox\].*result 600D'; then echo "t_chipset PASS"
 
 out=$(timeout 1800 ./$OBJ/Vtb_top --rom ../asm/build/t_hrtmon_mmu.rom --cart ../asm/build/hrtmon_stub.bin --ms 200 --quiet 2>&1) || true
 if echo "$out" | grep -q '^\[mailbox\].*result 600D'; then echo "t_hrtmon_mmu PASS"; else echo "$out" | grep -v '^\[sim\]'; echo "t_hrtmon_mmu FAIL"; fail=1; fi
+
+out=$(timeout 1800 ./$OBJ/Vtb_top --rom ../asm/build/t_ar.rom --ar ../asm/build/ar_stub.bin --ms 300 --quiet 2>&1) || true
+if echo "$out" | grep -q '^\[mailbox\].*result 600D'; then echo "t_ar PASS"; else echo "$out" | grep -v '^\[sim\]'; echo "t_ar FAIL"; fail=1; fi
 
 if PYTHONDONTWRITEBYTECODE=1 python3 timing_check.py --sim ./$OBJ/Vtb_top --rom ../asm/build/t_timing.rom; then
 	echo "t_timing PASS"

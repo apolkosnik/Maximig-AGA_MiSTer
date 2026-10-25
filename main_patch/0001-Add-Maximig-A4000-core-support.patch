@@ -1,7 +1,8 @@
 From a3e6d2c731411cb104b62837f2193ab17eac794c Mon Sep 17 00:00:00 2001
 From: Adam Polkosnik <apolkosnik@gmail.com>
 Date: Fri, 23 Oct 2026 14:11:51 -0400
-Subject: [PATCH] Add the Maximig (Amiga 4000/040) core to the Minimig family
+Subject: [PATCH 1/2] Add the Maximig (Amiga 4000/040) core to the Minimig
+ family
 
 The Maximig core speaks the Minimig protocol: is_minimig() takes its name,
 its media share games/Amiga, and its System menu shows what the A4000 has --

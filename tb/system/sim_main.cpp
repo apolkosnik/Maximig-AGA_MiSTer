@@ -20,6 +20,8 @@
 //     --customtrace     print writes to DMACON, COP1LC/2LC, COPJMP, BPLCON0, INTENA,
 //                       INTREQ, COLOR00
 //     --dumpchip MS FILE write the 2 MB of chip RAM to FILE at MS milliseconds
+//     --dumpsd OFF LEN FILE  at the end, LEN bytes of the SDRAM from byte OFF
+//                       (motherboard RAM $07xxxxxx is at 0x1000000 + A23-A0)
 //                       (MS "end": when the run ends)
 //     --cart FILE       upload FILE at $A10000 through Main's UIO_MM2_WR
 //                       protocol (HRTmon is enabled in the config)
@@ -27,6 +29,9 @@
 //     --extrom FILE     upload FILE at $E00000 as Main does (the core then shows
 //                       it at $F00000 too)
 //     --cart-config     after --cart, write HRTmon's configuration as Main does
+//     --ar FILE         the cartridge is the Action Replay (Main's ext_cfg bit
+//                       21, status[53]): upload FILE (AR5.ROM, up to 512 KB)
+//                       at $A80000 as Main does
 //     --freeze-ms N     press F11 after N simulated milliseconds of running
 //     --quiet           no progress lines
 //     --vcd FILE        (TRACE=1 builds) write an FST waveform of
@@ -188,6 +193,36 @@ static bool load_cart(const char *path)
 	return true;
 }
 
+// AR5.ROM: the ROM ($A80000) and the RAM image ($AC0000), as Main uploads it
+static bool load_ar(const char *path)
+{
+	FILE *f = fopen(path, "rb");
+	if (!f) { fprintf(stderr, "cannot open %s\n", path); return false; }
+	std::vector<uint8_t> b(0x80000);
+	size_t n = fread(b.data(), 1, b.size(), f);
+	fclose(f);
+	for (uint32_t i = 0; i < n; i += 512) {
+		uint32_t a = 0xA80000 + i;
+		std::vector<uint8_t> cmd = {0xF0, (uint8_t)a, (uint8_t)(a >> 8), (uint8_t)(a >> 16), 0};
+		for (uint32_t j = 0; j < 512; j++) cmd.push_back(i + j < n ? b[i + j] : 0);
+		uio_cmd(cmd);
+	}
+	return true;
+}
+
+static void dump_sd(const char *path, uint32_t off, uint32_t len)
+{
+	FILE *f = fopen(path, "wb");
+	if (!f) { fprintf(stderr, "cannot open %s\n", path); return; }
+	sdram_scope();
+	for (uint32_t w = off / 2; w < (off + len) / 2; w++) {
+		uint32_t v = sdram_peek16(w);
+		fputc((v >> 8) & 0xFF, f);
+		fputc(v & 0xFF, f);
+	}
+	fclose(f);
+}
+
 static void dump_chip(const char *path)
 {
 	FILE *f = fopen(path, "wb");
@@ -327,8 +362,10 @@ int main(int argc, char **argv)
 	double lbtrace_from = 0, dump_ms = -1, freeze_ms = -1;
 	bool dump_end = false;
 	const char *dump_file = nullptr, *cart = nullptr;
+	const char *dsd_file = nullptr;
+	uint32_t dsd_off = 0, dsd_len = 0;
 	bool cart_config = false;
-	const char *extrom = nullptr;
+	const char *extrom = nullptr, *arrom = nullptr;
 	std::vector<uint32_t> ddrpeek;
 	long pctrace = 0;
 	Video video;
@@ -351,10 +388,12 @@ int main(int argc, char **argv)
 		else if (a == "--quiet") quiet = true;
 		else if (a == "--iostat") iostat = true;
 		else if (a == "--customtrace") customtrace = true;
+		else if (a == "--dumpsd") { dsd_off = strtoul(next(), nullptr, 0); dsd_len = strtoul(next(), nullptr, 0); dsd_file = next(); }
 		else if (a == "--dumpchip") { const char *t = next(); dump_end = !strcmp(t, "end"); dump_ms = dump_end ? -1 : atof(t); dump_file = next(); }
 		else if (a == "--cart") cart = next();
 		else if (a == "--cart-config") cart_config = true;
 		else if (a == "--extrom") extrom = next();
+		else if (a == "--ar") arrom = next();
 		else if (a == "--ddrpeek") ddrpeek.push_back((uint32_t)strtoul(next(), nullptr, 0));
 		else if (a == "--freeze-ms") freeze_ms = atof(next());
 #if VM_TRACE
@@ -377,6 +416,7 @@ int main(int argc, char **argv)
 	top->io_uio = 0; top->io_fpga = 0; top->io_strobe = 0; top->io_din = 0;
 	for (int i = 0; i < 3; i++) top->rtc[i] = 0;
 	top->kbd_mouse_data = 0; top->kbd_mouse_type = 0; top->kbd_mouse_level = 0;
+	top->cart_ar = arrom != nullptr;
 	idle_sys(64);
 	if (!load_rom(rom)) return 2;
 	top->reset = 0;
@@ -392,6 +432,7 @@ int main(int argc, char **argv)
 	uio_cmd({0xF8, 0x00});                                      // no hard disks
 	if (cart && !load_cart(cart)) return 2;
 	if (extrom && !load_extrom(extrom)) return 2;
+	if (arrom && !load_ar(arrom)) return 2;
 	if (cart && cart_config) {
 		// the configuration Main's UploadActionReplay() writes after the image
 		// (support/minimig/minimig_config.cpp): +20 and +68 of $A10000; for
@@ -509,6 +550,10 @@ int main(int argc, char **argv)
 		}
 	}
 	if (!uart.line.empty()) printf("[serial] %s\n", uart.line.c_str());
+	if (dsd_file) {
+		dump_sd(dsd_file, dsd_off, dsd_len);
+		printf("[dump] SDRAM %08X+%X to %s\n", dsd_off, dsd_len, dsd_file);
+	}
 	if (dump_file && dump_end) {
 		dump_chip(dump_file);
 		printf("[dump] chip RAM to %s at %.3f ms\n", dump_file, sim_ms());
