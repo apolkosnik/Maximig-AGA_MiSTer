@@ -240,7 +240,8 @@ ap68040 cpu
 	.br_n(), .bg_n(1'b0), .bb_n_i(1'b1), .bb_n_o(), .bb_oe(),
 	.rsto_n(cpu_rsto_n), .cdis_n(1'b1), .mdis_n(1'b1), .ipend_n(), .pst(),
 
-	.dbg_pc(dbg_pc), .dbg_retire(dbg_retire), .dbg_halted(dbg_halted)
+	.dbg_pc(dbg_pc), .dbg_retire(dbg_retire), .dbg_xgo(dbg_xgo), .dbg_xvec(dbg_xvec), .dbg_xpc(dbg_xpc),
+	.dbg_halted(dbg_halted)
 );
 
 wire        lb_req, lb_ack, lb_we, lb_line, lb_berr, lb_ci;
@@ -353,6 +354,19 @@ wire        extrom_on;           // the chipset: an extension ROM is loaded
 // CPU halting (a double fault).  It arms after 2^22 instructions (the
 // boot's own resets come before); a4k_lbus copies it to DDR3 at
 // 0x27FF6400.
+// (MAXIMIG_RTR_ILLEGAL: an illegal instruction's exception freezes it too,
+// for a program that dies with 8000 0004; cputest ends every test with
+// ILLEGAL).  The last exception's vector and stacked PC go with it.
+wire        dbg_xgo;
+wire  [7:0] dbg_xvec;
+wire [31:0] dbg_xpc;
+reg   [7:0] rtr_xvec = 8'd0;
+reg  [31:0] rtr_xpc = 32'd0;
+`ifdef MAXIMIG_RTR_ILLEGAL
+localparam RTR_ILL = 1'b1;
+`else
+localparam RTR_ILL = 1'b0;
+`endif
 wire [31:0] rtr_rd;
 wire  [7:0] rtr_ra;
 reg   [7:0] rtr_wp = 8'd0;
@@ -367,7 +381,11 @@ reg  [31:0] rtr_ram [256];
 reg  [31:0] rtr_q;
 always @(posedge clk_cpu) begin
 	if (!rtr_frz) begin
-		if (rtr_arm && (!cpu_rsti_n || !cpu_rsto_n || dbg_halted)) rtr_frz <= 1'b1;
+		if (dbg_xgo) begin
+			rtr_xvec <= dbg_xvec;
+			rtr_xpc  <= dbg_xpc;
+		end
+		if (rtr_arm && (!cpu_rsti_n || !cpu_rsto_n || dbg_halted || (RTR_ILL && dbg_xgo && dbg_xvec == 8'd4))) rtr_frz <= 1'b1;
 		else if (dbg_retire) begin
 			rtr_ram[rtr_wp] <= dbg_pc;
 			rtr_wp <= rtr_wp + 1'd1;
@@ -409,6 +427,8 @@ a4k_lbus lbus
 	.dbg_pc(dbg_pc),
 	.rtr_frz(rtr_frz),
 	.rtr_wp(rtr_wp),
+	.rtr_xvec(rtr_xvec),
+	.rtr_xpc(rtr_xpc),
 	.rtr_ra(rtr_ra),
 	.rtr_rd(rtr_rd),
 
