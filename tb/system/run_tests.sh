@@ -13,7 +13,10 @@
 #   tb_denise Denise: BPLxDAT/SPRxDATx loads in the wide fetch modes (tb/denise/run.sh)
 #   tb_rtc    the RP5C01: 12/24-hour writes and counts (tb/rtc/run.sh)
 #   tb_rtg    the RTG driver's SetGC/SetPanning on the AP68040 bench (tb/rtg/run.sh)
-#   tb_audio, tb_pot  Paula's audio DMA blocks, the analog pots (tb/paula/run.sh)
+#   tb_cia    the 8520s' PB6/PB7 timer outputs (tb/cia/run.sh)
+#   tb_a2065  the A2065's CMD ring at a full host (tb/a2065/run.sh)
+#   tb_audio, tb_attach, tb_pot  Paula's audio DMA blocks, channel attachment,
+#             the analog pots (tb/paula/run.sh)
 #   tb_memory, tb_card  the local bus, SDRAM (refresh too), DDR3, RTG
 #             registers and CLUT, the A3640 (tb/mem/run.sh)
 #   t_blitter 650 random blits (area, fill, descending, lines) against a
@@ -59,6 +62,8 @@ if ../agnus/run.sh; then :; else fail=1; fi
 if ../denise/run.sh; then :; else fail=1; fi
 if ../rtc/run.sh; then :; else fail=1; fi
 if ../rtg/run.sh; then :; else fail=1; fi
+if ../cia/run.sh; then :; else fail=1; fi
+if ../a2065/run.sh; then :; else fail=1; fi
 
 [ $fail -eq 0 ] && echo "ALL PASSED" || echo "FAILURES"
 exit $fail

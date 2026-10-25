@@ -380,6 +380,38 @@ static void t_lastline()
 	}
 }
 
+// vertical blanking: lines 0..VBSTOP, or with VARVBEN the programmed blank,
+// after the VBSTRT line to the VBSTOP line, across the field's end (WinUAE
+// agnus_pvb; an audit's reproducer: VTOTAL 100, VBSTRT 80, VBSTOP 10)
+static void vb_lines(const char *what, std::vector<std::pair<int,int>> lines)
+{
+	while (!(vp() == 0 && hp() == 0x40)) slot();   // a whole field first
+	slot();
+	while (!(vp() == 0 && hp() == 0x40)) slot();
+	for (auto &l : lines) {
+		wait_pos(l.first, 0x40);
+		char b[96]; snprintf(b, sizeof b, "%s: line %d blanked", what, l.first);
+		check(b, (int)R(vbl), l.second);
+	}
+}
+
+static void t_vbstrt()
+{
+	reset_chip(false);
+	vb_lines("PAL default (VBSTOP 25)", {{0, 1}, {25, 1}, {26, 0}, {200, 0}, {311, 0}});
+	cpu_write(0x1CC, 200);                 // VBSTRT
+	cpu_write(0x1CE, 30);                  // VBSTOP
+	cpu_write(0x1DC, 0x1020);              // BEAMCON0: VARVBEN, PAL
+	vb_lines("VARVBEN, VBSTRT 200, VBSTOP 30", {{0, 1}, {30, 1}, {31, 0}, {100, 0}, {200, 0}, {201, 1}, {311, 1}});
+	cpu_write(0x1C8, 100);                 // VTOTAL
+	cpu_write(0x1CC, 80);
+	cpu_write(0x1CE, 10);
+	cpu_write(0x1DC, 0x10A0);              // VARVBEN, VARBEAMEN, PAL
+	vb_lines("VTOTAL 100, VBSTRT 80, VBSTOP 10", {{5, 1}, {10, 1}, {11, 0}, {20, 0}, {80, 0}, {81, 1}, {90, 1}, {100, 1}});
+	cpu_write(0x1DC, 0x00A0);              // VARBEAMEN alone: the fixed blank
+	vb_lines("VARBEAMEN without VARVBEN", {{20, 1}, {25, 1}, {26, 0}, {90, 0}});
+}
+
 // VHPOSR read values around the line wrap (WinUAE: 80E1 80E2 8000 8001 8102 8103)
 static void t_vhposr()
 {
@@ -554,6 +586,7 @@ int main(int argc, char **argv)
 	else if (test == "bltend") { t_bltend(0); t_bltend(7); }
 	else if (test == "lace") t_lace(ntsc);
 	else if (test == "lastline") t_lastline();
+	else if (test == "vbstrt") t_vbstrt();
 	else if (test == "slots") t_slots(ntsc, argc > 3 ? atoi(argv[3]) : 0, argc > 4 ? strtol(argv[4], 0, 16) : 0x38);
 	else { printf("unknown test\n"); return 2; }
 	printf("%s: %d failure(s)\n", test.c_str(), fails);

@@ -39,7 +39,11 @@
  * Priority: CMD doorbell > boardram window > CSR/INT poll.
  */
 
-module a2065_ddr3_mailbox (
+module a2065_ddr3_mailbox #(
+    // how long a command waits for room in a full ring before it is
+    // dropped: 2^FULL_WAIT_BITS clocks (2^26 at 114 MHz: 0.59 s)
+    parameter FULL_WAIT_BITS = 26
+) (
     input  wire         clk,
     input  wire         rst_n,
 
@@ -83,7 +87,16 @@ module a2065_ddr3_mailbox (
      * single-threaded, and while it sits in its IDE handler waiting for the
      * Amiga, the Amiga would be sitting on a stretched DTACK waiting for Main.
      * 256 entries is far more than the 68k can post while Main is busy
-     * elsewhere. */
+     * elsewhere.
+     *
+     * A full ring is not written over: with a host that publishes its read
+     * index (INT_STATE bit 1), a command that would land on an entry the host
+     * has not read waits, polling, until the host has drained.  The 68k is
+     * held only by its next RDP write meanwhile.  So that Main blocked in its
+     * IDE handler on the Amiga cannot deadlock against it, the wait is
+     * bounded: after 2^FULL_WAIT_BITS clocks the command is dropped (not
+     * written over the oldest) and counted in the high half of the published
+     * write index, where the host can see that it lost commands. */
     localparam AV_CMD_WPTR     = 29'h1001;
     localparam AV_CMD_RING     = 29'h1100;
     localparam CMD_RING_BITS   = 8;
@@ -113,6 +126,8 @@ module a2065_ddr3_mailbox (
 
     reg [3:0] state;
     reg [31:0] cmd_wr_idx;
+    reg [31:0] cmd_drops;      // commands dropped at a full ring (WPTR 63:32)
+    reg [FULL_WAIT_BITS-1:0] full_wait;
     reg        wptr_published;
 
     reg  [7:0] poll_div;
@@ -201,6 +216,10 @@ module a2065_ddr3_mailbox (
     wire [15:0] csr0_ack = csr0_sum(csr0_out & ~ack_w1c);
 
     wire        host_valid = int_word[1];
+    // the ring holds 2^CMD_RING_BITS entries the host has not read
+    wire [31:0] ring_used  = cmd_wr_idx - host_seq;
+    wire        ring_full  = host_valid && |ring_used[31:CMD_RING_BITS];
+    wire        full_timeout = &full_wait;
     wire [31:0] host_lag   = host_seq - clr_seq;
     wire [15:0] pend_eff   = (host_valid && host_lag[31]) ? clr_pend : 16'd0;
     wire [15:0] csr0_rd    = avl_readdata[15:0];
@@ -228,6 +247,8 @@ module a2065_ddr3_mailbox (
             br_lane         <= 0;
             br_be           <= 2'b11;
             cmd_wr_idx      <= 32'd0;
+            cmd_drops       <= 32'd0;
+            full_wait       <= 0;
             wptr_published  <= 1'b0;
             clr_pend        <= 16'd0;
             clr_seq         <= 32'd0;
@@ -255,6 +276,10 @@ module a2065_ddr3_mailbox (
             end
 
             poll_div <= poll_div + 1'b1;
+            if (cmd_active && !cmd_clear && ring_full)
+                full_wait <= full_timeout ? full_wait : full_wait + 1'b1;
+            else
+                full_wait <= 0;
 
             case (state)
             S_IDLE: begin
@@ -270,7 +295,16 @@ module a2065_ddr3_mailbox (
                 end else if (cmd_active && !cmd_clear && cmd_noop) begin
                     cmd_clear <= 1'b1;
                     state     <= S_CMD_DONE;
-                end else if (cmd_active && !cmd_clear) begin
+                end else if (cmd_active && !cmd_clear && ring_full && full_timeout) begin
+                    // the host has not drained for too long: drop it, count it
+                    cmd_drops      <= cmd_drops + 1'b1;
+                    avl_address    <= DDR3_BASE + AV_CMD_WPTR;
+                    avl_writedata  <= {cmd_drops + 1'b1, cmd_wr_idx};
+                    avl_byteenable <= 8'hFF;
+                    avl_burstcount <= 1;
+                    avl_write      <= 1;
+                    state          <= S_CMD_WPTR_W;
+                end else if (cmd_active && !cmd_clear && !ring_full) begin
                     avl_address    <= DDR3_BASE + AV_CMD_RING
                                       + {21'b0, cmd_wr_idx[CMD_RING_BITS-1:0]};
                     avl_writedata  <= {39'b0, cmd_data_s, cmd_rap_s, 1'b1};
@@ -311,7 +345,7 @@ module a2065_ddr3_mailbox (
                         if (!csr0_ack[7]) a2065_int2 <= 1'b0;
                     end
                     avl_address    <= DDR3_BASE + AV_CMD_WPTR;
-                    avl_writedata  <= {32'b0, cmd_wr_idx + 1'b1};
+                    avl_writedata  <= {cmd_drops, cmd_wr_idx + 1'b1};
                     avl_byteenable <= 8'hFF;
                     avl_burstcount <= 1;
                     avl_write      <= 1;

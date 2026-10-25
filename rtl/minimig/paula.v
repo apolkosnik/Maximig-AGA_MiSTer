@@ -309,6 +309,7 @@ paula_audio ad1
 	.reg_address_in(reg_address_in),
 	.data_in(data_in),
 	.dmaena(auden[3:0]),
+	.adkcon(adkcon[7:0]),
 	.audint(audint[3:0]),
 	.audpen(audpen),
 	.dmal(audio_dmal),

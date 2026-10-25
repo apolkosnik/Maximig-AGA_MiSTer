@@ -18,7 +18,9 @@ module cia_timerb
   input  eclk,            // External clock input (usually E clock)
   input  cnt,             // CNT pin input
   input  tmra_ovf,        // Timer A underflow signal for cascade mode
-  output  irq             // Timer underflow interrupt request
+  output  irq,            // Timer underflow interrupt request
+  output  pbon,           // CR bit 1: the timer's output on PB7
+  output  pbout           // that output: a pulse, or the toggle (CR bit 2)
 );
 
 // Internal registers - similar structure to Timer A
@@ -155,6 +157,35 @@ assign underflow = zero & start & count; // Underflow when counting through zero
 
 // Output signals
 assign irq = underflow;  // Interrupt request on underflow
+
+// The timer's output on PB7 (8520: CR bit 1 PBON puts it on the pin, an
+// output whatever DDRB says; bit 2 OUTMODE picks it): a pulse one E cycle
+// long at each underflow, or a toggle that each underflow inverts and that
+// is set high whenever the timer starts
+reg start_d;
+reg tog;
+reg pls;
+always @(posedge clk)
+  if (clk7_en) begin
+    start_d <= start;
+    if (reset) begin
+      tog <= 1'b0;
+      pls <= 1'b0;
+    end
+    else begin
+      if (start && !start_d)
+        tog <= 1'b1;
+      else if (underflow)
+        tog <= ~tog;
+      if (underflow)
+        pls <= 1'b1;
+      else if (eclk)
+        pls <= 1'b0;
+    end
+  end
+
+assign pbon  = tmcr[1];
+assign pbout = tmcr[2] ? tog : pls;
 
 // CPU read data multiplexer
 // Note: Bit 7 of CRB (ALARM bit) is handled by Timer D module

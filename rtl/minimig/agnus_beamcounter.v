@@ -193,7 +193,7 @@ reg [ 1:0] hbstop_lo;
 reg [10:0] vtotal_reg;
 reg [10:0] vsstrt_reg;
 reg [10:0] vsstop_reg;
-//reg [10:0] vbstrt_reg;
+reg [10:0] vbstrt_reg;
 reg [10:0] vbstop_reg;
 
 always @ (posedge clk) begin
@@ -210,7 +210,7 @@ always @ (posedge clk) begin
 			vtotal_reg  <= pal ? VTOTAL_PAL_VAL : VTOTAL_NTSC_VAL;
 			vsstrt_reg  <= VSSTRT_VAL[10:0];
 			vsstop_reg  <= VSSTOP_VAL[10:0];
-			//vbstrt_reg  <= VBSTRT_VAL[10:0];
+			vbstrt_reg  <= VBSTRT_VAL[10:0];
 			vbstop_reg  <= pal ? VBSTOP_PAL_VAL : VBSTOP_NTSC_VAL;
 		end else begin
 			case (reg_address_in[8:1])
@@ -223,7 +223,7 @@ always @ (posedge clk) begin
 				VTOTAL [8:1] : vtotal_reg  <= {data_in[10:0]};
 				VSSTRT [8:1] : vsstrt_reg  <= {data_in[10:0]};
 				VSSTOP [8:1] : vsstop_reg  <= {data_in[10:0]};
-				//VBSTRT [8:1] : vbstrt_reg  <= {data_in[10:0]};
+				VBSTRT [8:1] : vbstrt_reg  <= {data_in[10:0]};
 				VBSTOP [8:1] : vbstop_reg  <= {data_in[10:0]};
 			endcase
 		end
@@ -242,8 +242,8 @@ wire [ 1:0] hbstop_f =            varbeamen ? hbstop_lo   : 2'b00;
 wire [10:0] vtotal  =             varbeamen ? vtotal_reg  : pal ? VTOTAL_PAL_VAL : VTOTAL_NTSC_VAL;
 wire [10:0] vsstrt  = varvsyen && varbeamen ? vsstrt_reg  : VSSTRT_VAL[10:0];
 wire [10:0] vsstop  = varvsyen && varbeamen ? vsstop_reg  : VSSTOP_VAL[10:0];
-//wire [10:0] vbstrt  = varvben  && varbeamen ? vbstrt_reg  : VBSTRT_VAL[10:0];
-wire [10:0] vbstop  = varvben  && varbeamen ? vbstop_reg  : pal ? VBSTOP_PAL_VAL : VBSTOP_NTSC_VAL;
+wire [10:0] vbstrt  = vbstrt_reg;
+wire [10:0] vbstop  = varvben ? vbstop_reg  : pal ? VBSTOP_PAL_VAL : VBSTOP_NTSC_VAL;
 
 assign htotal_out    = htotal;
 assign harddis_out   = harddis || varbeamen || varvben;
@@ -425,22 +425,25 @@ assign _csync = _hsync & _vsync | vser; //composite sync with serration pulses
 //                                                                                      //
 //--------------------------------------------------------------------------------------//
 
-/*
-//vertical blanking
-reg vbl_reg;
-always @ (posedge clk) begin
-  if (reset)
-    vbl_reg <= 1'b0;
-  else if (vpos == vbstrt)
-    vbl_reg <= 1'b1;
-  else if (vpos == vbstop)
-    vbl_reg <= 1'b0;
+//vertical blanking: lines 0 to VBSTOP, or with VARVBEN (BEAMCON0 bit 12) the
+//programmed blank: it starts after the VBSTRT line and ends with the VBSTOP
+//line, across the end of the field too (WinUAE agnus_pvb with its start and
+//end lines)
+reg        pvb;
+reg [10:0] pvb_vpos;
+always @(posedge clk) begin
+	if (clk7_en) begin
+		pvb_vpos <= vpos;
+		if (reset)
+			pvb <= 1'b0;
+		else if (vpos != pvb_vpos) begin
+			if (vpos == vbstop)      pvb <= 1'b0;
+			else if (vpos == vbstrt) pvb <= 1'b1;
+		end
+	end
 end
 
-assign vbl = vbl_reg; // TODO
-*/
-
-assign vbl = (vpos <= vbstop);
+assign vbl = varvben ? (pvb || vpos == vbstop) && vpos != vbstrt : (vpos <= vbstop);
 
 //vertical blanking end (last line)
 assign vblend = vpos==vbstop;

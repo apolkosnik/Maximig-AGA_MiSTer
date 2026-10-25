@@ -3,8 +3,8 @@
 # amiga_clk.v): the beam counters (PAL/NTSC, long/short lines and frames,
 # LOL, VPOSR ID, VHPOSR across the line end), DMACON, the copper (WAIT,
 # SKIP, CDANG, the restart), the DMA slot map, sprites against the bitplane
-# DMA window, the last line, BLTPRI.  tb_agnus.cpp plays the 68k bridge
-# and Paula's DMAL.  (After an audit's bench, 2026-10-24.)
+# DMA window, the last line, BLTPRI, the programmed vertical blank.
+# tb_agnus.cpp plays the 68k bridge and Paula's DMAL.  (After an audit's bench, 2026-10-24.)
 cd "$(dirname "$0")"
 M=${R:-../../rtl}/minimig
 verilator --cc --exe --build -j 8 -O2 --no-timing --public-flat-rw --x-assign fast --x-initial fast -Wno-fatal -Wno-lint -Wno-style \
@@ -15,7 +15,7 @@ verilator --cc --exe --build -j 8 -O2 --no-timing --public-flat-rw --x-assign fa
 	$M/agnus_blitter_adrgen.v $M/agnus_bitplanedma.v $M/agnus_beamcounter.v $M/agnus_audiodma.v \
 	$M/amiga_clk.v tb_agnus.cpp -o tb_agnus > build.log 2>&1 || { tail -20 build.log; exit 1; }
 : > run.log
-for t in "beam" "beam ntsc" "lol" "dmacon" "lace" "lace ntsc" "lastline" "vhposr" "cop" "sprwin" "nasty" "bltend" "slots pal 0"; do
+for t in "beam" "beam ntsc" "lol" "dmacon" "lace" "lace ntsc" "lastline" "vhposr" "cop" "sprwin" "nasty" "bltend" "vbstrt" "slots pal 0"; do
 	echo "=== tb_agnus $t" >> run.log
 	timeout 300 ./obj/tb_agnus $t >> run.log 2>&1 || echo "FAIL tb_agnus $t exited $?" >> run.log
 done

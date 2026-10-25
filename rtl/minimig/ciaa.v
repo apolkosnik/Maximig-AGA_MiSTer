@@ -333,11 +333,17 @@ always @(posedge clk)
       regportb[7:0] <= data_in[7:0];
   end
 
+// the port's pins: PB6/PB7 carry timer A/B's output when CRA/CRB PBON is
+// set (an output then whatever DDRB says)
+wire       ta_pbon, ta_pb, tb_pbon, tb_pb;
+wire [7:0] portb_drv  = (regportb[7:0] & ddrportb[7:0]) | (portb_in[7:0] & ~ddrportb[7:0]);
+wire [7:0] portb_pins = {tb_pbon ? tb_pb : portb_drv[7], ta_pbon ? ta_pb : portb_drv[6], portb_drv[5:0]};
+
 // Port B read multiplexer
 always @(*)
 begin
   if (!wr && prb)
-    pb_out[7:0] = (regportb[7:0] & ddrportb[7:0]) | (portb_in[7:0] & ~ddrportb[7:0]);
+    pb_out[7:0] = portb_pins[7:0];
   else if (!wr && ddrb)
     pb_out[7:0] = (ddrportb[7:0]);  // Read direction register
   else
@@ -388,7 +394,9 @@ cia_timera tmra
   .cnt(cnt_in),
   .spmode(spmode),
   .tmra_ovf(tmra_ovf),
-  .irq(ta)
+  .irq(ta),
+  .pbon(ta_pbon),
+  .pbout(ta_pb)
 );
 
 // Timer B - General purpose timer, can cascade with Timer A
@@ -406,7 +414,9 @@ cia_timerb tmrb
   .eclk(eclk),
   .cnt(cnt_in),
   .tmra_ovf(tmra_ovf),
-  .irq(tb)
+  .irq(tb),
+  .pbon(tb_pbon),
+  .pbout(tb_pb)
 );
 
 // Timer D - Time of Day clock with alarm

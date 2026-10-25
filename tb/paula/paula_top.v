@@ -23,6 +23,8 @@ module paula_top
 	output  [2:0] state0,
 	output [15:0] lencnt0,
 	output        silence0,
+	output  [6:0] vol1,          // channel 1's AUD1VOL, AUD1PER (attachment)
+	output [15:0] per1,
 	output [14:0] ldata,
 	input   [8:1] ram_wa,        // unused
 	input         ram_we,
@@ -84,5 +86,7 @@ assign sample0  = p.ad1.sample0;
 assign state0   = p.ad1.ach0.audio_state;
 assign lencnt0  = p.ad1.ach0.lencnt;
 assign silence0 = p.ad1.ach0.silence;
+assign vol1     = p.ad1.ach1.audvol;
+assign per1     = p.ad1.ach1.audper;
 
 endmodule

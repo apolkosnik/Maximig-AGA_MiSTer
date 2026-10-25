@@ -1,4 +1,9 @@
-//This module handles a single amiga audio channel. attached modes are not supported
+//This module handles a single amiga audio channel.
+// Attachment (ADKCON, HRM chapter 5, WinUAE audio.cpp loaddat): with ATVOLn or
+// ATPERn the channel's data words go to the next channel's volume or period
+// (both: volume and period by turns), and its own output is silent.  ATPER's
+// word is taken as the high byte's period ends, ATVOL's as the low byte's;
+// the DMA requests and interrupts follow those words.
 // 2020-09-07: pwm controlled volume gated sample output implemented by OKK
 
 module paula_audio_channel
@@ -18,7 +23,15 @@ module paula_audio_channel
   input  intpen,          //interrupt pending input
   output  reg dmareq,        //dma request
   output  reg dmas,        //dma special (restart)
-  input  strhor          //horizontal strobe
+  input  strhor,          //horizontal strobe
+  input  atvol,           //ADKCON: this channel modulates the next one's volume
+  input  atper,           //ADKCON: this channel modulates the next one's period
+  output reg mod_vol,     //its data word is the next channel's volume now
+  output reg mod_per,     //its data word is the next channel's period now
+  output [15:0] mod_dat,  //that word
+  input  in_vol,          //the previous channel's word is this channel's volume
+  input  in_per,          //the previous channel's word is this channel's period
+  input  [15:0] in_dat    //that word
 );
 
 //register names and addresses
@@ -91,6 +104,8 @@ always @(posedge clk) begin
       audper[15:0] <= 16'h00_00;
     else if (aen && (reg_address_in[3:1]==AUDPER[3:1]))
       audper[15:0] <= data[15:0];
+    else if (in_per && cck)
+      audper[15:0] <= in_dat[15:0];
   end
 end
 
@@ -101,6 +116,8 @@ always @(posedge clk) begin
       audvol[6:0] <= 7'b000_0000;
     else if (aen && (reg_address_in[3:1]==AUDVOL[3:1]))
       audvol[6:0] <= data[6:0];
+    else if (in_vol && cck)
+      audvol[6:0] <= in_dat[6:0];
   end
 end
 
@@ -198,13 +215,22 @@ always @(posedge clk) begin
 end
 
 //assign sample[7:0] = penhi ? datbuf[15:8] : datbuf[7:0];
-assign sample[7:0] = silence ? 8'b0 : (penhi ? datbuf[15:8] : datbuf[7:0]);
+// an attached channel only modulates the next one: its output is silent
+wire attached = atvol | atper;
+assign sample[7:0] = silence | attached ? 8'b0 : (penhi ? datbuf[15:8] : datbuf[7:0]);
 
 // By: OKK (The correct way Paula really works!)
-assign sample_okk[7:0] = (silence | !volgate ? 8'b0 : (penhi ? datbuf[15:8] : datbuf[7:0])); // pwm volume gated sample output
+assign sample_okk[7:0] = (silence | attached | !volgate ? 8'b0 : (penhi ? datbuf[15:8] : datbuf[7:0])); // pwm volume gated sample output
 
 //volume output
 assign volume[6:0] = audvol[6:0];
+
+// the word an attached channel passes on (WinUAE: its data register)
+assign mod_dat = auddat;
+
+// a channel modulating by period and not volume (napnav = 0) asks for its
+// next word, and interrupts, as the high byte's period ends only
+wire napnav = !atper | atvol;
 
 //dma request logic
 always @(posedge clk) begin
@@ -257,6 +283,8 @@ end
 
 //transition function
 always @(*) begin
+  mod_vol = 1'b0;
+  mod_per = 1'b0;
   case (audio_state)
 
     AUDIO_STATE_0: //audio FSM idle state
@@ -353,8 +381,9 @@ always @(*) begin
       if (AUDxON && AUDxDAT) //requested data has arrived
       begin
         audio_next = AUDIO_STATE_3;
-        AUDxDR = 1'b1;
+        AUDxDR = napnav;
         AUDxIR = 1'b0;
+        mod_vol = atvol;  //the first word is the next channel's volume (WinUAE state 5)
         lencount = 1'b0;  //the length counted at state 1's word only (WinUAE audio.cpp state 5)
         pbufld1 = 1'b1;  //new data has been just received so put it in the output buffer
         percntrld = 1'b1;
@@ -400,6 +429,14 @@ always @(*) begin
         audio_next = AUDIO_STATE_4;
         percount = 1'b0;
         percntrld = 1'b1;
+        if (atper) begin
+          // ATPER: this word is the next channel's period; the next word is
+          // asked for, and the interrupt is given, here (WinUAE state 2->3)
+          mod_per = 1'b1;
+          AUDxDR = AUDxON;
+          AUDxIR = (intreq2 & AUDxON) | ~AUDxON;
+          intreq2_clr = intreq2 & AUDxON;
+        end
       end
       else
       begin
@@ -421,9 +458,10 @@ always @(*) begin
       if (perfin && (AUDxON || !AUDxIP)) //period counter expired and audio DMA active
       begin
         audio_next = AUDIO_STATE_3;
-        AUDxDR = AUDxON;
-        AUDxIR = (intreq2 & AUDxON) | ~AUDxON;
-        intreq2_clr = intreq2;
+        AUDxDR = AUDxON & napnav;
+        AUDxIR = napnav & ((intreq2 & AUDxON) | ~AUDxON);
+        intreq2_clr = intreq2 & napnav;
+        mod_vol = atvol;  //ATVOL: this word is the next channel's volume (WinUAE state 3->2)
         pbufld1 = 1'b1;
         percount = 1'b0;
         percntrld = 1'b1;

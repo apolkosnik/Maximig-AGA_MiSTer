@@ -116,6 +116,7 @@ module paula_audio
   input  wire [  9-1:1] reg_address_in, // register address input
   input  wire [ 16-1:0] data_in,        // bus data in
   input  wire [  4-1:0] dmaena,         // audio dma register input
+  input  wire [  8-1:0] adkcon,         // ADKCON 7-0: ATPER3-0, ATVOL3-0 (attachment)
   output wire [  4-1:0] audint,         // audio interrupt request
   input  wire [  4-1:0] audpen,         // audio interrupt pending
   output reg  [  4-1:0] dmal,           // dma request
@@ -151,6 +152,10 @@ wire  [  7-1:0] vol0;     //channel 0 volume
 wire  [  7-1:0] vol1;     //channel 1 volume
 wire  [  7-1:0] vol2;     //channel 2 volume
 wire  [  7-1:0] vol3;     //channel 3 volume
+// attachment: channel n's words to channel n+1's volume/period (3's: nowhere)
+wire  [  4-1:0] mod_vol;
+wire  [  4-1:0] mod_per;
+wire  [ 16-1:0] mod_dat [4];
 wire  [ 16-1:0] ldatasum;
 wire  [ 16-1:0] rdatasum;
 
@@ -197,7 +202,15 @@ paula_audio_channel ach0
   .intpen(audpen[0]),
   .dmareq(dmareq[0]),
   .dmas(dmaspc[0]),
-  .strhor(strhor)
+  .strhor(strhor),
+  .atvol(adkcon[0]),
+  .atper(adkcon[4]),
+  .mod_vol(mod_vol[0]),
+  .mod_per(mod_per[0]),
+  .mod_dat(mod_dat[0]),
+  .in_vol(1'b0),
+  .in_per(1'b0),
+  .in_dat(16'h0000)
 );
 
 //instantiate audio channel 1
@@ -218,7 +231,15 @@ paula_audio_channel ach1
   .intpen(audpen[1]),
   .dmareq(dmareq[1]),
   .dmas(dmaspc[1]),
-  .strhor(strhor)
+  .strhor(strhor),
+  .atvol(adkcon[1]),
+  .atper(adkcon[5]),
+  .mod_vol(mod_vol[1]),
+  .mod_per(mod_per[1]),
+  .mod_dat(mod_dat[1]),
+  .in_vol(mod_vol[0]),
+  .in_per(mod_per[0]),
+  .in_dat(mod_dat[0])
 );
 
 //instantiate audio channel 2
@@ -239,7 +260,15 @@ paula_audio_channel ach2
   .intpen(audpen[2]),
   .dmareq(dmareq[2]),
   .dmas(dmaspc[2]),
-  .strhor(strhor)
+  .strhor(strhor),
+  .atvol(adkcon[2]),
+  .atper(adkcon[6]),
+  .mod_vol(mod_vol[2]),
+  .mod_per(mod_per[2]),
+  .mod_dat(mod_dat[2]),
+  .in_vol(mod_vol[1]),
+  .in_per(mod_per[1]),
+  .in_dat(mod_dat[1])
 );
 
 //instantiate audio channel 3
@@ -260,7 +289,15 @@ paula_audio_channel ach3
   .intpen(audpen[3]),
   .dmareq(dmareq[3]),
   .dmas(dmaspc[3]),
-  .strhor(strhor)
+  .strhor(strhor),
+  .atvol(adkcon[3]),
+  .atper(adkcon[7]),
+  .mod_vol(mod_vol[3]),
+  .mod_per(mod_per[3]),
+  .mod_dat(mod_dat[3]),
+  .in_vol(mod_vol[2]),
+  .in_per(mod_per[2]),
+  .in_dat(mod_dat[2])
 );
 
 // okk mixer
