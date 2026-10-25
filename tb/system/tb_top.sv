@@ -64,7 +64,7 @@ wire  [7:0] dd_burstcnt, dd_be;
 wire [28:0] dd_addr;
 wire [63:0] dd_dout, dd_din;
 
-a4k_machine #(.DUAL(1'b0), .BTIC(1'b0)) machine
+a4k_machine #(.DUAL(1'b1), .BTIC(1'b0)) machine
 (
 	.clk_114          (clk_114),
 	.clk_57           (clk_57),

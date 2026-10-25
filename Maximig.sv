@@ -49,9 +49,11 @@ localparam CONF_STR = {
 };
 
 // the CPU core's options (rtl/AP68040 doc/STATUS.md): the real 68040 is a
-// single-issue pipeline without branch target words
+// single-issue pipeline without branch target words; dual issue is on (a
+// one-word data register operation beside a single-uop instruction: a few
+// per cent on such code, the memory timings unchanged)
 `ifndef MAXIMIG_DUAL
-	`define MAXIMIG_DUAL 0
+	`define MAXIMIG_DUAL 1
 `endif
 `ifndef MAXIMIG_BTIC
 	`define MAXIMIG_BTIC 0
