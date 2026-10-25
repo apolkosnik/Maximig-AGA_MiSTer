@@ -346,7 +346,8 @@ wire        extrom_on;           // the chipset: an extension ROM is loaded
 // The retired-PC ring, a debug aid with the PC sampler (MAXIMIG_PCSAMPLE):
 // the PCs of the last 256 instructions retired, frozen at the first sign of
 // a crash once armed: an instruction retired from the vector page
-// ($000000-$0003FF: nothing runs there, a runaway does), a RESET
+// ($000002-$0003FF: nothing runs there, a runaway does; exception entry
+// retires at 0), a RESET
 // instruction (Kickstart's ColdReboot after an Alert), a CPU reset, or the
 // CPU halting (a double fault).  It arms after 2^22 instructions (the
 // boot's own resets come before); a4k_lbus copies it to DDR3 at
@@ -370,7 +371,8 @@ always @(posedge clk_cpu) begin
 			rtr_ram[rtr_wp] <= dbg_pc;
 			rtr_wp <= rtr_wp + 1'd1;
 			if (!rtr_arm) rtr_cnt <= rtr_cnt + 1'd1;
-			else if (dbg_pc[31:10] == 22'd0) rtr_frz <= 1'b1;
+			// (an exception's entry retires at PC 0: not a runaway)
+			else if (dbg_pc[31:10] == 22'd0 && dbg_pc[9:0] != 10'd0) rtr_frz <= 1'b1;
 		end
 	end
 end
