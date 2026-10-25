@@ -343,6 +343,33 @@ wire  [7:0] a2065_base, toccata_base;
 wire        ovl;
 wire        extrom_on;           // the chipset: an extension ROM is loaded
 
+// The retired-PC ring, a debug aid with the PC sampler (MAXIMIG_PCSAMPLE):
+// the PCs of the last 256 instructions retired, frozen at the first one
+// retired from $000000-$0003FF (the vector page: nothing runs there, a
+// runaway does) once one has retired elsewhere (the reset's own entry
+// retires at 0); a4k_lbus copies it to DDR3 at 0x27FF6400.
+wire [31:0] rtr_rd;
+wire  [7:0] rtr_ra;
+reg   [7:0] rtr_wp = 8'd0;
+reg         rtr_frz = 1'b0;
+reg         rtr_arm = 1'b0;
+`ifdef MAXIMIG_PCSAMPLE
+reg  [31:0] rtr_ram [256];
+reg  [31:0] rtr_q;
+always @(posedge clk_cpu) begin
+	if (dbg_retire && !rtr_frz) begin
+		rtr_ram[rtr_wp] <= dbg_pc;
+		rtr_wp <= rtr_wp + 1'd1;
+		if (dbg_pc[31:10] != 22'd0) rtr_arm <= 1'b1;
+		else if (rtr_arm)           rtr_frz <= 1'b1;
+	end
+end
+always @(posedge clk_57) rtr_q <= rtr_ram[rtr_ra];
+assign rtr_rd = rtr_q;
+`else
+assign rtr_rd = 32'd0;
+`endif
+
 a4k_lbus lbus
 (
 	.clk(clk_57),
@@ -364,6 +391,10 @@ a4k_lbus lbus
 	.gary_ien(gary_ien),
 	.iack7_t(iack7_t),
 	.dbg_pc(dbg_pc),
+	.rtr_frz(rtr_frz),
+	.rtr_wp(rtr_wp),
+	.rtr_ra(rtr_ra),
+	.rtr_rd(rtr_rd),
 
 	.lb_req(lb_req),
 	.lb_ack(lb_ack),

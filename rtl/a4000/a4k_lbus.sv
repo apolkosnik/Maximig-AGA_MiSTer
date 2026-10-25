@@ -63,6 +63,10 @@ module a4k_lbus
 	input             extrom_on,     // an extension ROM is loaded: shown at $F00000 too
 	input             iack7_t,       // the card: toggles at a level-7 interrupt acknowledge
 	input      [31:0] dbg_pc,        // the CPU's PC, for the PC sampler
+	input             rtr_frz,       // the retired-PC ring has frozen (CPU clock)
+	input       [7:0] rtr_wp,        // ... its next slot: the oldest entry
+	output reg  [7:0] rtr_ra,        // ... read address
+	input      [31:0] rtr_rd,        // ... its entry (registered)
 
 	// the card
 	input             lb_req,
@@ -427,6 +431,21 @@ localparam PCS_EN = 1'b1;
 `else
 localparam PCS_EN = 1'b0;
 `endif
+// the retired-PC ring (a4k_machine), once frozen: its 256 entries to
+// 0x27FF6400 in slot order, then at 0x27FF610C {8'h5A, next slot}
+reg  [1:0] rtr_fs = 2'b00;
+reg  [8:0] rtr_i = 9'd0;     // entries written; 256: the header
+reg        rtr_hdr = 1'b0;   // the header written
+reg  [7:0] rtr_ra_d = 8'd0;
+always @(posedge clk) begin
+	rtr_fs   <= {rtr_fs[0], rtr_frz};
+	rtr_ra   <= rtr_i[7:0];
+	rtr_ra_d <= rtr_ra;
+end
+// rtr_rd is entry rtr_i: its address has been there a clock (the RAM's
+// registered read)
+wire       rtr_rdy = rtr_ra == rtr_i[7:0] && rtr_ra_d == rtr_i[7:0];
+wire       rtr_go = PCS_EN && rtr_fs[1] && !rtr_hdr;
 reg [11:0] pcs_tmr = 12'd0;
 reg        pcs_t = 1'b0, pcs_d = 1'b0;
 reg [25:0] pcs_n = 26'd0;
@@ -542,7 +561,17 @@ always @(posedge clk) begin
 		end
 	end
 	else case (st)
-		S_IDLE: if (PCS_EN && !beat_new && pcs_t != pcs_d && !dd_busy) begin
+		S_IDLE: if (rtr_go && rtr_rdy && !beat_new && !dd_busy) begin
+			// the frozen retired-PC ring, one entry at a time, then its header
+			dd_addr  <= rtr_i[8] ? {13'h07FF, 8'h61, 6'd3} : {13'h07FF, 6'b011001, rtr_i[7:0]};
+			dd_we    <= 1'b1;
+			dd_be    <= 4'hF;
+			dd_wdata <= rtr_i[8] ? {24'h00005A, rtr_wp} : rtr_rd;
+			dd_req   <= ~dd_req;
+			if (rtr_i[8]) rtr_hdr <= 1'b1;
+			rtr_i    <= rtr_i + 1'd1;
+		end
+		else if (PCS_EN && !beat_new && pcs_t != pcs_d && !dd_busy) begin
 			// a PC sample: the slot (unless the ring has stopped), then the
 			// count and the event counters
 			pcs_d    <= pcs_t;
