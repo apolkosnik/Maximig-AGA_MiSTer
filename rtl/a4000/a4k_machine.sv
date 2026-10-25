@@ -346,8 +346,9 @@ wire        extrom_on;           // the chipset: an extension ROM is loaded
 // The retired-PC ring, a debug aid with the PC sampler (MAXIMIG_PCSAMPLE):
 // the PCs of the last 256 instructions retired, frozen at the first one
 // retired from $000000-$0003FF (the vector page: nothing runs there, a
-// runaway does) once one has retired elsewhere (the reset's own entry
-// retires at 0); a4k_lbus copies it to DDR3 at 0x27FF6400.
+// runaway does) once one has retired elsewhere since the last reset (the
+// reset's own entry retires at 0); a4k_lbus copies it to DDR3 at
+// 0x27FF6400.
 wire [31:0] rtr_rd;
 wire  [7:0] rtr_ra;
 reg   [7:0] rtr_wp = 8'd0;
@@ -357,7 +358,10 @@ reg         rtr_arm = 1'b0;
 reg  [31:0] rtr_ram [256];
 reg  [31:0] rtr_q;
 always @(posedge clk_cpu) begin
-	if (dbg_retire && !rtr_frz) begin
+	// a reset (the core's own, after the ROM is loaded) disarms: its entry
+	// retires at 0
+	if (!cpu_rsti_n) rtr_arm <= 1'b0;
+	else if (dbg_retire && !rtr_frz) begin
 		rtr_ram[rtr_wp] <= dbg_pc;
 		rtr_wp <= rtr_wp + 1'd1;
 		if (dbg_pc[31:10] != 22'd0) rtr_arm <= 1'b1;
