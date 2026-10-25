@@ -48,17 +48,6 @@ localparam CONF_STR = {
 	"V,v",`BUILD_DATE
 };
 
-// the CPU core's options (rtl/AP68040 doc/STATUS.md): the real 68040 is a
-// single-issue pipeline without branch target words; dual issue is on (a
-// one-word data register operation beside a single-uop instruction: a few
-// per cent on such code, the memory timings unchanged)
-`ifndef MAXIMIG_DUAL
-	`define MAXIMIG_DUAL 1
-`endif
-`ifndef MAXIMIG_BTIC
-	`define MAXIMIG_BTIC 0
-`endif
-
 wire [15:0] JOY0;
 wire [15:0] JOY1;
 wire [15:0] JOY2;
@@ -312,10 +301,8 @@ wire  [6:0] IndirectUserOutFlop;
 wire        user_port_mode;
 assign USER_OUT = user_port_mode ? IndirectUserOutFlop : IndirectUserOutmt32;
 
-a4k_machine #(
-	.DUAL(`MAXIMIG_DUAL),
-	.BTIC(`MAXIMIG_BTIC)
-) machine (
+a4k_machine machine
+(
 	.clk_114          (clk_114),
 	.clk_57           (clk_57),
 	.clk_sys          (clk_sys),

@@ -11,10 +11,6 @@
 //============================================================================
 
 module a4k_machine
-#(
-	parameter bit DUAL = 0,          // AP68040 dual issue (the real 68040 has none)
-	parameter bit BTIC = 0           // AP68040 BTB target words
-)
 (
 	// clocks: one PLL, edge aligned
 	input             clk_114,       // SDRAM, DDR3
@@ -227,10 +223,8 @@ always @(posedge clk_57) if (cpu_ce) cpu_rsti_n <= sys_rst_n;
 reg cpu_rsto_sys_n = 1'b1;
 always @(posedge clk_sys) cpu_rsto_sys_n <= cpu_rsto_n;
 
-ap68040 #(
-	.DUAL(DUAL),
-	.BTIC(BTIC)
-) cpu (
+ap68040 cpu
+(
 	.clk(clk_cpu),
 	.bclk_en(1'b1),
 	.rsti_n(cpu_rsti_n),
@@ -246,8 +240,7 @@ ap68040 #(
 	.br_n(), .bg_n(1'b0), .bb_n_i(1'b1), .bb_n_o(), .bb_oe(),
 	.rsto_n(cpu_rsto_n), .cdis_n(1'b1), .mdis_n(1'b1), .ipend_n(), .pst(),
 
-	.dbg_pc(dbg_pc), .dbg_retire(dbg_retire), .dbg_halted(dbg_halted),
-	.dbg_vbr(), .dbg_cacr(), .dbg_cmaint(), .dbg_fe(), .dbg_pev()
+	.dbg_pc(dbg_pc), .dbg_retire(dbg_retire), .dbg_halted(dbg_halted)
 );
 
 wire        lb_req, lb_ack, lb_we, lb_line, lb_berr, lb_ci;
