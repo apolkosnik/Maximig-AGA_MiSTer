@@ -133,7 +133,9 @@ logic       hwr_;           // HWR edge detect
 logic [5:0] auto_callibration; // auto callibration counter
 
 // interrupt change registers
-struct {
+// (packed: a submodule's output drives one field, always_ff the others,
+// and the simulator takes both drivers only on a packed struct)
+struct packed {
     logic rst;
     logic wr_en;
     logic rd_en;
