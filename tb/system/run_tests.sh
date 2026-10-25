@@ -27,6 +27,10 @@ out=$(timeout 1800 ./$OBJ/Vtb_top --rom ../asm/build/t_board.rom --cart ../asm/b
 echo "$out" | grep -v '^\[sim\]'
 if echo "$out" | grep -q '^\[mailbox\].*result 600D'; then echo "t_board  PASS"; else echo "t_board  FAIL"; fail=1; fi
 
+# the same in Fast bus timing (chip writes posted by Budgie, the regions' waits gone)
+out=$(timeout 1800 ./$OBJ/Vtb_top --rom ../asm/build/t_board.rom --cart ../asm/build/hrtmon_stub.bin --extrom ../asm/build/extrom_pattern.bin --ms 400 --fast --quiet 2>&1) || true
+if echo "$out" | grep -q '^\[mailbox\].*result 600D'; then echo "t_board (fast) PASS"; else echo "$out" | grep -v '^\[sim\]'; echo "t_board (fast) FAIL"; fail=1; fi
+
 out=$(timeout 1800 ./$OBJ/Vtb_top --rom ../asm/build/t_chipset.rom --ms 1500 --quiet 2>&1) || true
 if echo "$out" | grep -q '^\[mailbox\].*result 600D'; then echo "t_chipset PASS"; else echo "$out" | grep -v '^\[sim\]'; echo "t_chipset FAIL"; fail=1; fi
 

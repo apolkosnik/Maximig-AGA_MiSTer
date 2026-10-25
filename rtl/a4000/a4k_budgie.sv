@@ -13,8 +13,9 @@
 //    chip-bus access can also wait CHIP_SYNC colour clocks after the chip
 //    bus has terminated it (Budgie's resynchronisation to the CPU bus); it
 //    is 0: the bridge and the card's own cost already give the A3640's
-//    measured chip line fill (tb/system/timing_check.py), so Fast timing
-//    changes nothing on the chip bus.
+//    measured chip line fill (tb/system/timing_check.py).  In Fast timing a
+//    write of one cycle to chip RAM or a custom register is acknowledged as
+//    it starts (a posted write); the handshake finishes behind it.
 //  * the RP5C01 (a4k_rtc): 4-bit registers on the odd byte of $DC0000+4n.
 //  * the A4000 IDE (ide.v): the task file at $DD2020+4n, data on D31-D16 of
 //    the long word at $DD2020, byte registers on D15-D8 (Linux pata_gayle:
@@ -110,6 +111,7 @@ localparam [3:0] S_IDLE = 4'd0, S_CYC = 4'd1, S_CHIP = 4'd2, S_CHIPEND = 4'd3, S
 reg  [3:0] st;
 reg        hi;          // the cycle in progress is the word at A1 = 0
 reg        both;        // the beat needs both words
+reg        pst;         // the beat was acknowledged at its start (a posted write, Fast)
 reg  [5:0] cnt;
 reg  [1:0] sync;
 reg        e7_seen;     // a 7 MHz edge since AS was negated
@@ -141,6 +143,7 @@ always @(posedge clk) begin
 	if (reset) begin
 		st        <= S_IDLE;
 		sb_ack    <= sb_req;
+		pst       <= 1'b0;
 		cpu_as_n  <= 1'b1;
 		cpu_uds_n <= 1'b1;
 		cpu_lds_n <= 1'b1;
@@ -197,6 +200,15 @@ always @(posedge clk) begin
 						end
 						cpu_as_n <= 1'b0;
 						st       <= S_CHIP;
+						// Fast: a write of one bus cycle to chip RAM or a custom
+						// register is acknowledged now, its data latched here;
+						// the chip-bus handshake finishes behind it and the next
+						// access waits for it (order and DMA slots unchanged)
+						if (fast && sb_we && (sb_tgt == SB_CHIP || sb_tgt == SB_CREG) &&
+						    ((sb_tgt == SB_CHIP && sb_be == 4'b1111 && chip32_en) || !both)) begin
+							sb_ack <= sb_req;
+							pst    <= 1'b1;
+						end
 					end
 					SB_RTC: begin
 						// the clock answers on the odd byte, D3-D0
@@ -345,7 +357,12 @@ always @(posedge clk) begin
 			end
 
 			S_NEXT: begin
-				if (both && hi) begin
+				if (pst) begin
+					// (acknowledged at its start: the request now may be the next beat's)
+					pst <= 1'b0;
+					st  <= S_IDLE;
+				end
+				else if (both && hi) begin
 					hi <= 1'b0;
 					st <= S_CYC;
 				end

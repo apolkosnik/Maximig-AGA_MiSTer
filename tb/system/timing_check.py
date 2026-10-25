@@ -2,7 +2,7 @@
 """Compare t_timing (Copperline's accelprobe rows) on the simulated machine
 with the real A4000 + A3640 (68040 at 25 MHz) values from accelprobe.asm.
 
-  timing_check.py [--sim BIN] [--rom ROM] [--tol PCT] [--strict]
+  timing_check.py [--sim BIN] [--rom ROM] [--tol PCT] [--strict] [--fast]
 
 The simulation runs with --z3 1 (16 MB motherboard RAM, a 128 MB Zorro III
 RAM board) and --lbtrace.  Two kinds of result come out:
@@ -17,7 +17,8 @@ RAM board) and --lbtrace.  Two kinds of result come out:
 
 Every row outside the tolerance is printed as DEVIATES.  Without --strict
 only the board's line-fill times decide the exit status; --strict makes
-every row count.
+every row count.  --fast runs the machine in Fast bus timing (deliberately
+quicker than the A3640): the rows are reported, nothing is gated.
 """
 import re
 import subprocess
@@ -55,7 +56,7 @@ LINES = {
 
 def main():
     args = sys.argv[1:]
-    sim, rom, tol, strict = './obj_tests/Vtb_top', '../asm/build/t_timing.rom', 10.0, False
+    sim, rom, tol, strict, fast = './obj_tests/Vtb_top', '../asm/build/t_timing.rom', 10.0, False, False
     while args:
         a = args.pop(0)
         if a == '--sim':
@@ -66,11 +67,13 @@ def main():
             tol = float(args.pop(0))
         elif a == '--strict':
             strict = True
+        elif a == '--fast':
+            fast = True
         else:
             print(__doc__)
             return 2
 
-    p = subprocess.run([sim, '--rom', rom, '--ms', '400', '--z3', '1', '--quiet', '--lbtrace'],
+    p = subprocess.run([sim, '--rom', rom, '--ms', '400', '--z3', '1', '--quiet', '--lbtrace'] + (['--fast'] if fast else []),
                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=3600)
     # (the ROM's text comes a character at a time between the beat lines;
     # each row is a whole line, $RRxxxxxx)
@@ -125,6 +128,9 @@ def main():
             fails.append(r)
 
     print()
+    if fast:
+        print('Fast timing: reported only')
+        return 0
     if deviations:
         print('rows outside %.0f%%: %s' % (tol, ' '.join(str(r) for r in deviations)))
     if strict:
