@@ -227,7 +227,17 @@ always @(posedge clk_57) if (cpu_ce) cpu_rsti_n <= sys_rst_n;
 reg cpu_rsto_sys_n = 1'b1;
 always @(posedge clk_sys) cpu_rsto_sys_n <= cpu_rsto_n;
 
-ap68040 cpu
+// the CPU's debug outputs: the PC sampler's recorder and the benches
+// read them; a release build leaves them out (their loads cost the fit)
+`ifdef MAXIMIG_PCSAMPLE
+localparam CPU_DEBUG = 1'b1;
+`elsif VERILATOR
+localparam CPU_DEBUG = 1'b1;
+`else
+localparam CPU_DEBUG = 1'b0;
+`endif
+
+ap68040 #(.DEBUG(CPU_DEBUG)) cpu
 (
 	.clk(clk_cpu),
 	.bclk_en(1'b1),
