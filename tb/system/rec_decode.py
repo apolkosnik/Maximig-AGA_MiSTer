@@ -10,7 +10,7 @@
 import struct, sys
 
 NAMES = {1: "BE-redirect", 2: "DEC-redirect", 3: "BTB", 4: "exc-flush", 5: "handler-fetch"}
-FLAGS = (("x", 0x80), ("F", 0x40), ("L", 0x20), ("K", 0x10), ("R", 0x08), ("P", 0x04))
+FLAGS = (("x", 0x80), ("F", 0x40), ("L", 0x20))
 
 class Rec:
     def __init__(self, path):
@@ -57,7 +57,7 @@ def show(r, n):
     print("front-end events (oldest first; slot numbers mod 256):")
     for slot, t, tgt in r.events():
         print("  slot %3d %-14s %08x" % (slot, NAMES.get(t, "?"), tgt))
-    print("retired uops, newest last (slot: pc  exc  exr first last kill eredir excpend):")
+    print("retired uops, newest last (slot: pc  exc  exr first last):")
     for s, pc, inf in r.uops()[-n:]:
         print("  %3d: %08x  exc=%02x %s" % (s, pc, inf >> 8, flags(inf)))
     print("bus beats, newest last (addr data tgt flags):")
@@ -79,10 +79,11 @@ def check_rtr(r):
     s, pc, inf = u[-1]
     if pc != 0x100 or inf & 0x60 != 0x60:
         bad.append("the newest entry is %08x %s, not $100 with first and last" % (pc, flags(inf)))
-    # an interrupt: a uop with the kill bit, then the routine's retire (exr) at PC 0
-    irq = [i for i in range(1, 256) if u[i][1] == 0 and u[i][2] & 0x80 and u[i-1][2] & 0x10]
+    # an interrupt: the routine's retire (exr) at PC 0 after a last uop, then
+    # the handler's first instruction
+    irq = [i for i in range(1, 255) if u[i][1] == 0 and u[i][2] & 0x80 and u[i-1][2] & 0x20 and u[i+1][1] == r.w(0x118)]
     if not irq:
-        bad.append("no interrupt entry (a killed uop, then the routine's retire at PC 0)")
+        bad.append("no interrupt entry (a last uop, the routine's retire at PC 0, the handler)")
     if r.w(0x110) != 26:
         bad.append("the last exception's vector is %d, not 26 (level 2)" % r.w(0x110))
     if not any(t == 5 and tgt == r.w(0x118) for _, t, tgt in r.events()):

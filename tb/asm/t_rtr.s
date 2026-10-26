@@ -9,7 +9,7 @@
 ; with --ddrdump (on the board: memdump 0x27FF6000 0x2000), and rec.py
 ; decodes it: the ring must end with the loop, the jump and the landing at
 ; $100, each entry's info word its first/last bits, an interrupt's entry the
-; kill bit on the uop before it and the routine's retire (exr) at PC 0, the
+; routine's retire (exr) at PC 0 after the uop before it, the
 ; handler fetch of $68 in the events and on the bus.
 ;
 ;  PASS 0 after the wait at $100; 1 an exception other than the level-2

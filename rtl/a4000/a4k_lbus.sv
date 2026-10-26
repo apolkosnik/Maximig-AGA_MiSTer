@@ -479,7 +479,7 @@ localparam PCS_EN = 1'b0;
 // 8'd0, the ring's next slot then}, the target (type 1 back-end redirect,
 // 2 decoder redirect, 3 BTB, 4 flush without redirect, 5 handler fetch);
 // and after the header, at 0x27FF6800, with each ring entry the uop's
-// {exc[7:0], exr, first, last, kill, eredir, exc_pend, 0, 0} in the low half
+// {exc[7:0], exr, first, last, 5'b0} in the low half
 reg  [1:0] rtr_fs = 2'b00;
 reg  [9:0] rtr_i = 10'd0;    // words written: 0-255 the ring, 256-319 the events, 320-326 the header, 512-767 the info
 reg        rtr_hdr = 1'b0;   // the header written
