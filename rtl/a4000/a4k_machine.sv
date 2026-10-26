@@ -418,6 +418,10 @@ always @(posedge clk_cpu) begin
 			// (Kickstart's entry, $F800D0-$F800D2, reached by a jump rather
 			// than a reset: a runaway into a cold start)
 			else if (dbg_pc[31:8] == 24'h00F800) rtr_frz <= 1'b1;
+			// (nothing runs above the Zorro III RAM boards, $58000000 up: the
+			// RTG board, autoconfig space -- a runaway through a stale return
+			// address lands there before it reaches low memory)
+			else if (dbg_pc[31:27] >= 5'd11) rtr_frz <= 1'b1;
 		end
 	end
 end
