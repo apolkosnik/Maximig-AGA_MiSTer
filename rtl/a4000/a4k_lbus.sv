@@ -481,6 +481,45 @@ end
 // registered read)
 wire       rtr_rdy = rtr_ra == rtr_i[7:0] && rtr_ra_d == rtr_i[7:0];
 wire       rtr_go = PCS_EN && rtr_fs[1] && !rtr_hdr;
+
+// the last 256 beats on this bus, frozen with the retired-PC ring and
+// written to 0x27FF7000 after it, oldest first, 16 bytes each: the
+// address, the data (written, or read), {target[4:0], BERR, write,
+// byte enables[3:0], TT[1:0], TM[2:0], line, beat[1:0], 13'd0}, and
+// {8'hB5, next slot} (the bus side of a runaway: a vector fetch's address
+// and what it read, the writes before it)
+`ifdef MAXIMIG_PCSAMPLE
+reg [31:0] bus_a [256];
+reg [31:0] bus_d [256];
+reg [31:0] bus_f [256];
+reg  [7:0] bus_wp = 8'd0;
+reg [31:0] bus_qa, bus_qd, bus_qf;
+reg  [9:0] bus_i = 10'd0;    // words written: entry bus_i[9:2], word bus_i[1:0]
+reg        bus_done = 1'b0;
+reg  [7:0] bus_ra = 8'd0, bus_ra_d = 8'd0;
+always @(posedge clk) begin
+	if (st == S_DONE && !rtr_fs[1]) begin
+		bus_a[bus_wp] <= {lb_addr, 2'b00};
+		bus_d[bus_wp] <= lb_we ? lb_wdata : rdata;
+		bus_f[bus_wp] <= {dec, berr, lb_we, lb_be, lb_tt, lb_tm, lb_line, lb_beat, 13'd0};
+		bus_wp <= bus_wp + 1'd1;
+	end
+	bus_ra   <= bus_wp + bus_i[9:2];
+	bus_ra_d <= bus_ra;
+	bus_qa   <= bus_a[bus_ra];
+	bus_qd   <= bus_d[bus_ra];
+	bus_qf   <= bus_f[bus_ra];
+end
+wire       bus_rdy = bus_ra == bus_wp + bus_i[9:2] && bus_ra_d == bus_ra;
+wire       bus_go  = rtr_hdr && !bus_done;
+wire [31:0] bus_q  = (bus_i[1:0] == 2'd0) ? bus_qa : (bus_i[1:0] == 2'd1) ? bus_qd :
+                     (bus_i[1:0] == 2'd2) ? bus_qf : {16'h0000, 8'hB5, bus_wp};
+`else
+wire       bus_rdy = 1'b0, bus_go = 1'b0;
+wire [31:0] bus_q  = 32'd0;
+reg  [9:0] bus_i = 10'd0;
+reg        bus_done = 1'b0;
+`endif
 reg [11:0] pcs_tmr = 12'd0;
 reg        pcs_t = 1'b0, pcs_d = 1'b0;
 reg [25:0] pcs_n = 26'd0;
@@ -649,6 +688,16 @@ always @(posedge clk) begin
 			dd_req   <= ~dd_req;
 			if (rtr_i[8] && rtr_i[1:0] == 2'd2) rtr_hdr <= 1'b1;
 			rtr_i    <= rtr_i + 1'd1;
+		end
+		else if (bus_go && bus_rdy && !beat_new && !dd_busy) begin
+			// the bus ring, a word at a time, after the retired-PC ring
+			dd_addr  <= {13'h07FF, 4'h7, bus_i};
+			dd_we    <= 1'b1;
+			dd_be    <= 4'hF;
+			dd_wdata <= bus_q;
+			dd_req   <= ~dd_req;
+			bus_i    <= bus_i + 1'd1;
+			if (bus_i == 10'h3FF) bus_done <= 1'b1;
 		end
 		else if (PCS_EN && !beat_new && pcs_t != pcs_d && !dd_busy) begin
 			// a PC sample: the slot (unless the ring has stopped), then the
