@@ -70,6 +70,10 @@ module a4k_lbus
 	input       [7:0] rtr_wp,        // ... its next slot: the oldest entry
 	input       [7:0] rtr_xvec,      // ... the last exception's vector and
 	input      [31:0] rtr_xpc,       // ... stacked PC
+	input      [31:0] rtr_hfld,      // ... the last handler fetch's load data,
+	input      [31:0] rtr_hfa,       // ... its A operand register value,
+	input       [7:0] rtr_hff,       // ... {A source, the DMU job's answer},
+	input      [31:0] rtr_hfpc,      // ... its PC field
 	output reg  [7:0] rtr_ra,        // ... read address
 	input      [31:0] rtr_rd,        // ... its entry (registered)
 
@@ -467,9 +471,12 @@ localparam PCS_EN = 1'b0;
 `endif
 // the retired-PC ring (a4k_machine), once frozen: its 256 entries to
 // 0x27FF6400 in slot order, then at 0x27FF610C {8'h5A, next slot}, at
-// 0x27FF6110 the last exception's vector and at 0x27FF6114 its stacked PC
+// 0x27FF6110 the last exception's vector and at 0x27FF6114 its stacked PC,
+// at 0x27FF6118-0x27FF6124 the last exception routine's handler fetch: its
+// load data, its A operand register value, {A source, DMU job, 0} in the
+// top byte, its PC field
 reg  [1:0] rtr_fs = 2'b00;
-reg  [9:0] rtr_i = 10'd0;    // entries written; 256-258: the header words
+reg  [9:0] rtr_i = 10'd0;    // entries written; 256-262: the header words
 reg        rtr_hdr = 1'b0;   // the header written
 reg  [7:0] rtr_ra_d = 8'd0;
 always @(posedge clk) begin
@@ -680,13 +687,15 @@ always @(posedge clk) begin
 	else case (st)
 		S_IDLE: if (rtr_go && rtr_rdy && !beat_new && !dd_busy) begin
 			// the frozen retired-PC ring, one entry at a time, then its header
-			dd_addr  <= rtr_i[8] ? {13'h07FF, 8'h61, 6'd3 + 6'(rtr_i[1:0])} : {13'h07FF, 6'b011001, rtr_i[7:0]};
+			dd_addr  <= rtr_i[8] ? {13'h07FF, 8'h61, 6'd3 + 6'(rtr_i[2:0])} : {13'h07FF, 6'b011001, rtr_i[7:0]};
 			dd_we    <= 1'b1;
 			dd_be    <= 4'hF;
-			dd_wdata <= !rtr_i[8] ? rtr_rd : (rtr_i[1:0] == 2'd0) ? {24'h00005A, rtr_wp} :
-			            (rtr_i[1:0] == 2'd1) ? {24'd0, rtr_xvec} : rtr_xpc;
+			dd_wdata <= !rtr_i[8] ? rtr_rd : (rtr_i[2:0] == 3'd0) ? {24'h00005A, rtr_wp} :
+			            (rtr_i[2:0] == 3'd1) ? {24'd0, rtr_xvec} : (rtr_i[2:0] == 3'd2) ? rtr_xpc :
+			            (rtr_i[2:0] == 3'd3) ? rtr_hfld : (rtr_i[2:0] == 3'd4) ? rtr_hfa :
+			            (rtr_i[2:0] == 3'd5) ? {rtr_hff, 24'd0} : rtr_hfpc;
 			dd_req   <= ~dd_req;
-			if (rtr_i[8] && rtr_i[1:0] == 2'd2) rtr_hdr <= 1'b1;
+			if (rtr_i[8] && rtr_i[2:0] == 3'd6) rtr_hdr <= 1'b1;
 			rtr_i    <= rtr_i + 1'd1;
 		end
 		else if (bus_go && bus_rdy && !beat_new && !dd_busy) begin

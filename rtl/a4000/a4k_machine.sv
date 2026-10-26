@@ -245,6 +245,7 @@ ap68040 cpu
 	.rsto_n(cpu_rsto_n), .cdis_n(1'b1), .mdis_n(1'b1), .ipend_n(), .pst(),
 
 	.dbg_pc(dbg_pc), .dbg_retire(dbg_retire), .dbg_xgo(dbg_xgo), .dbg_xvec(dbg_xvec), .dbg_xpc(dbg_xpc),
+	.dbg_hfgo(dbg_hfgo), .dbg_hfld(dbg_hfld), .dbg_hfa(dbg_hfa), .dbg_hff(dbg_hff), .dbg_hfpc(dbg_hfpc),
 	.dbg_halted(dbg_halted)
 );
 
@@ -366,6 +367,13 @@ wire  [7:0] dbg_xvec;
 wire [31:0] dbg_xpc;
 reg   [7:0] rtr_xvec = 8'd0;
 reg  [31:0] rtr_xpc = 32'd0;
+// ... and the last exception routine's handler fetch (its load data, the
+// A operand's register value, {A source, the DMU job's answer}, its PC)
+wire        dbg_hfgo;
+wire [31:0] dbg_hfld, dbg_hfa, dbg_hfpc;
+wire  [7:0] dbg_hff;
+reg  [31:0] rtr_hfld = 32'd0, rtr_hfa = 32'd0, rtr_hfpc = 32'd0;
+reg   [7:0] rtr_hff = 8'd0;
 `ifdef MAXIMIG_RTR_ILLEGAL
 localparam RTR_ILL = 1'b1;
 `else
@@ -388,6 +396,12 @@ always @(posedge clk_cpu) begin
 		if (dbg_xgo) begin
 			rtr_xvec <= dbg_xvec;
 			rtr_xpc  <= dbg_xpc;
+		end
+		if (dbg_hfgo) begin
+			rtr_hfld <= dbg_hfld;
+			rtr_hfa  <= dbg_hfa;
+			rtr_hff  <= dbg_hff;
+			rtr_hfpc <= dbg_hfpc;
 		end
 		if (rtr_arm && (!cpu_rsti_n || !cpu_rsto_n || dbg_halted || (RTR_ILL && dbg_xgo && dbg_xvec == 8'd4))) rtr_frz <= 1'b1;
 		else if (dbg_retire) begin
@@ -436,6 +450,10 @@ a4k_lbus lbus
 	.rtr_wp(rtr_wp),
 	.rtr_xvec(rtr_xvec),
 	.rtr_xpc(rtr_xpc),
+	.rtr_hfld(rtr_hfld),
+	.rtr_hfa(rtr_hfa),
+	.rtr_hff(rtr_hff),
+	.rtr_hfpc(rtr_hfpc),
 	.rtr_ra(rtr_ra),
 	.rtr_rd(rtr_rd),
 
