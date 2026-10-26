@@ -29,7 +29,7 @@ set -e
 cd "$(dirname "$0")"
 OBJ=${OBJ:-obj_tests}
 OBJ=$OBJ ./build.sh > build_tests.log 2>&1 || { tail -30 build_tests.log; exit 1; }
-../asm/build.sh t_board t_timing hrtmon_stub t_hrtmon_mmu extrom_pattern t_chipset t_ar ar_stub > /dev/null
+../asm/build.sh t_board t_timing hrtmon_stub t_hrtmon_mmu extrom_pattern t_chipset t_ar ar_stub t_rtr > /dev/null
 
 fail=0
 out=$(timeout 1800 ./$OBJ/Vtb_top --rom ../asm/build/t_board.rom --cart ../asm/build/hrtmon_stub.bin --extrom ../asm/build/extrom_pattern.bin --ms 400 --quiet 2>&1) || true
@@ -48,6 +48,13 @@ if echo "$out" | grep -q '^\[mailbox\].*result 600D'; then echo "t_hrtmon_mmu PA
 
 out=$(timeout 1800 ./$OBJ/Vtb_top --rom ../asm/build/t_ar.rom --ar ../asm/build/ar_stub.bin --ms 300 --quiet 2>&1) || true
 if echo "$out" | grep -q '^\[mailbox\].*result 600D'; then echo "t_ar PASS"; else echo "$out" | grep -v '^\[sim\]'; echo "t_ar FAIL"; fail=1; fi
+
+# the PC sampler's recorder (a debug build: the macro MAXIMIG_PCSAMPLE, the
+# ring armed after 256 retires): t_rtr freezes it at $100, the DDR3 dump is
+# decoded and checked by rec_decode.py
+OBJ=${OBJ}_pcs ./build.sh -DMAXIMIG_PCSAMPLE=1 -DMAXIMIG_RTR_ARM_BITS=8 > build_tests_pcs.log 2>&1 || { tail -30 build_tests_pcs.log; exit 1; }
+out=$(timeout 1800 ./${OBJ}_pcs/Vtb_top --rom ../asm/build/t_rtr.rom --ms 300 --quiet --ddrdump 0x27FF6000 0x2000 ${OBJ}_pcs/t_rtr.bin 2>&1) || true
+if echo "$out" | grep -q '^\[mailbox\].*result 600D' && PYTHONDONTWRITEBYTECODE=1 python3 rec_decode.py ${OBJ}_pcs/t_rtr.bin --check-rtr > /dev/null; then echo "t_rtr PASS"; else echo "$out" | grep -v '^\[sim\]'; PYTHONDONTWRITEBYTECODE=1 python3 rec_decode.py ${OBJ}_pcs/t_rtr.bin --check-rtr; echo "t_rtr FAIL"; fail=1; fi
 
 if PYTHONDONTWRITEBYTECODE=1 python3 timing_check.py --sim ./$OBJ/Vtb_top --rom ../asm/build/t_timing.rom; then
 	echo "t_timing PASS"

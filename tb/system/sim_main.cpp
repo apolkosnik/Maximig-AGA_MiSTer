@@ -26,6 +26,8 @@
 //     --cart FILE       upload FILE at $A10000 through Main's UIO_MM2_WR
 //                       protocol (HRTmon is enabled in the config)
 //     --ddrpeek ADDR    at the end, print the long word at DDR3 physical ADDR
+//     --ddrdump ADDR LEN FILE  at the end, LEN bytes of DDR3 from physical ADDR
+//                       to FILE, as the ARM reads them (memdump's format)
 //     --extrom FILE     upload FILE at $E00000 as Main does (the core then shows
 //                       it at $F00000 too)
 //     --cart-config     after --cart, write HRTmon's configuration as Main does
@@ -367,6 +369,8 @@ int main(int argc, char **argv)
 	bool cart_config = false;
 	const char *extrom = nullptr, *arrom = nullptr;
 	std::vector<uint32_t> ddrpeek;
+	uint32_t ddd_addr = 0, ddd_len = 0;
+	const char *ddd_file = nullptr;
 	long pctrace = 0;
 	Video video;
 	for (int i = 1; i < argc; i++) {
@@ -395,6 +399,7 @@ int main(int argc, char **argv)
 		else if (a == "--extrom") extrom = next();
 		else if (a == "--ar") arrom = next();
 		else if (a == "--ddrpeek") ddrpeek.push_back((uint32_t)strtoul(next(), nullptr, 0));
+		else if (a == "--ddrdump") { ddd_addr = strtoul(next(), nullptr, 0); ddd_len = strtoul(next(), nullptr, 0); ddd_file = next(); }
 		else if (a == "--freeze-ms") freeze_ms = atof(next());
 #if VM_TRACE
 		else if (a == "--vcd") {
@@ -562,6 +567,19 @@ int main(int argc, char **argv)
 		ddr_scope();
 		uint64_t v = ddr_peek64(a >> 3);
 		printf("[ddr] %08X: %08X (as the ARM reads it)\n", a, (uint32_t)(v >> ((a & 4) ? 32 : 0)));
+	}
+	if (ddd_file) {
+		FILE *f = fopen(ddd_file, "wb");
+		if (!f) { perror(ddd_file); return 1; }
+		ddr_scope();
+		for (uint32_t a = ddd_addr; a < ddd_addr + ddd_len; a += 4) {
+			uint64_t v = ddr_peek64(a >> 3);
+			uint32_t w = (uint32_t)(v >> ((a & 4) ? 32 : 0));
+			uint8_t b[4] = { (uint8_t)w, (uint8_t)(w >> 8), (uint8_t)(w >> 16), (uint8_t)(w >> 24) };
+			fwrite(b, 1, 4, f);
+		}
+		fclose(f);
+		printf("[ddr] %08X+%X to %s\n", ddd_addr, ddd_len, ddd_file);
 	}
 	printf("[sim] end at %.3f ms, PC %08X, %lu beats, %lu retired, %d frames (%d written)\n", sim_ms(), top->dbg_pc,
 	       (unsigned long)beats, (unsigned long)retired, video.frame, video.written);
