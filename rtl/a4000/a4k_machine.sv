@@ -246,6 +246,7 @@ ap68040 cpu
 
 	.dbg_pc(dbg_pc), .dbg_retire(dbg_retire), .dbg_xgo(dbg_xgo), .dbg_xvec(dbg_xvec), .dbg_xpc(dbg_xpc),
 	.dbg_hfgo(dbg_hfgo), .dbg_hfld(dbg_hfld), .dbg_hfa(dbg_hfa), .dbg_hff(dbg_hff), .dbg_hfpc(dbg_hfpc),
+	.dbg_ev(dbg_ev), .dbg_evpc(dbg_evpc),
 	.dbg_halted(dbg_halted)
 );
 
@@ -380,7 +381,11 @@ localparam RTR_ILL = 1'b1;
 localparam RTR_ILL = 1'b0;
 `endif
 wire [31:0] rtr_rd;
-wire  [7:0] rtr_ra;
+wire  [8:0] rtr_ra;
+// the front end's last 32 events (redirects, the BTB's, exception entry,
+// the handler fetch), with the ring's next slot at each
+wire  [2:0] dbg_ev;
+wire [31:0] dbg_evpc;
 reg   [7:0] rtr_wp = 8'd0;
 reg         rtr_frz = 1'b0;
 `ifndef MAXIMIG_RTR_ARM_BITS
@@ -416,8 +421,26 @@ always @(posedge clk_cpu) begin
 		end
 	end
 end
-always @(posedge clk_57) rtr_q <= rtr_ram[rtr_ra];
-assign rtr_rd = rtr_q;
+reg  [31:0] ev_a [32];
+reg  [31:0] ev_b [32];
+reg   [4:0] ev_wp = 5'd0;
+reg  [31:0] ev_qa, ev_qb;
+reg         ev_sel = 1'b0, ev_w = 1'b0;
+always @(posedge clk_cpu)
+	if (!rtr_frz && dbg_ev != 3'd0) begin
+		ev_a[ev_wp] <= {8'hE5, 5'd0, dbg_ev, 8'd0, rtr_wp};
+		ev_b[ev_wp] <= dbg_evpc;
+		ev_wp <= ev_wp + 1'd1;
+	end
+wire  [4:0] ev_ri = ev_wp + rtr_ra[5:1];             // oldest first
+always @(posedge clk_57) begin
+	rtr_q  <= rtr_ram[rtr_ra[7:0]];
+	ev_qa  <= ev_a[ev_ri];
+	ev_qb  <= ev_b[ev_ri];
+	ev_sel <= rtr_ra[8];
+	ev_w   <= rtr_ra[0];
+end
+assign rtr_rd = ev_sel ? (ev_w ? ev_qb : ev_qa) : rtr_q;
 `else
 assign rtr_rd = 32'd0;
 `endif
