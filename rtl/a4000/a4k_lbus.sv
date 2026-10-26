@@ -74,7 +74,7 @@ module a4k_lbus
 	input      [31:0] rtr_hfa,       // ... its A operand register value,
 	input       [7:0] rtr_hff,       // ... {A source, the DMU job's answer},
 	input      [31:0] rtr_hfpc,      // ... its PC field
-	output reg  [8:0] rtr_ra,        // ... read address (256-319: the front-end event ring's words)
+	output reg  [9:0] rtr_ra,        // ... read address (256-319: the front-end event ring's words, 512-767: the uops' info)
 	input      [31:0] rtr_rd,        // ... its entry (registered)
 
 	// the card
@@ -477,22 +477,25 @@ localparam PCS_EN = 1'b0;
 // top byte, its PC field; and before the header, at 0x27FF6200, the last 32
 // front-end events oldest first, two words each: {8'hE5, 5'd0, type,
 // 8'd0, the ring's next slot then}, the target (type 1 back-end redirect,
-// 2 decoder redirect, 3 BTB, 4 flush without redirect, 5 handler fetch)
+// 2 decoder redirect, 3 BTB, 4 flush without redirect, 5 handler fetch);
+// and after the header, at 0x27FF6800, with each ring entry the uop's
+// {exc[7:0], exr, first, last, kill, eredir, exc_pend, 0, 0} in the low half
 reg  [1:0] rtr_fs = 2'b00;
-reg  [9:0] rtr_i = 10'd0;    // words written: 0-255 the ring, 256-319 the events, 320-326 the header
+reg  [9:0] rtr_i = 10'd0;    // words written: 0-255 the ring, 256-319 the events, 320-326 the header, 512-767 the info
 reg        rtr_hdr = 1'b0;   // the header written
-reg  [8:0] rtr_ra_d = 9'd0;
-wire       rtr_ev  = rtr_i[8] && !rtr_i[6];        // 256-319
-wire       rtr_hw  = rtr_i[8] && rtr_i[6];         // 320-326
+reg  [9:0] rtr_ra_d = 10'd0;
+wire       rtr_ev  = !rtr_i[9] && rtr_i[8] && !rtr_i[6];        // 256-319
+wire       rtr_hw  = !rtr_i[9] && rtr_i[8] && rtr_i[6];         // 320-326
+wire       rtr_in  = rtr_i[9];                                   // 512-767
 wire [2:0] rtr_k   = rtr_i[2:0];                    // the header word (320 = ...000)
 always @(posedge clk) begin
 	rtr_fs   <= {rtr_fs[0], rtr_frz};
-	rtr_ra   <= rtr_i[8:0];
+	rtr_ra   <= rtr_i[9:0];
 	rtr_ra_d <= rtr_ra;
 end
 // rtr_rd is entry rtr_i: its address has been there a clock (the RAM's
 // registered read)
-wire       rtr_rdy = rtr_ra == rtr_i[8:0] && rtr_ra_d == rtr_i[8:0];
+wire       rtr_rdy = rtr_ra == rtr_i[9:0] && rtr_ra_d == rtr_i[9:0];
 wire       rtr_go = PCS_EN && rtr_fs[1] && !rtr_hdr;
 
 // the last 256 beats on this bus, frozen with the retired-PC ring and
@@ -694,7 +697,8 @@ always @(posedge clk) begin
 		S_IDLE: if (rtr_go && rtr_rdy && !beat_new && !dd_busy) begin
 			// the frozen retired-PC ring, one entry at a time, then its header
 			dd_addr  <= rtr_hw ? {13'h07FF, 8'h61, 6'd3 + 6'(rtr_k)} :
-			            rtr_ev ? {13'h07FF, 8'h62, rtr_i[5:0]} : {13'h07FF, 6'b011001, rtr_i[7:0]};
+			            rtr_ev ? {13'h07FF, 8'h62, rtr_i[5:0]} :
+			            rtr_in ? {13'h07FF, 6'b011010, rtr_i[7:0]} : {13'h07FF, 6'b011001, rtr_i[7:0]};
 			dd_we    <= 1'b1;
 			dd_be    <= 4'hF;
 			dd_wdata <= !rtr_hw ? rtr_rd : (rtr_k == 3'd0) ? {24'h00005A, rtr_wp} :
@@ -702,8 +706,8 @@ always @(posedge clk) begin
 			            (rtr_k == 3'd3) ? rtr_hfld : (rtr_k == 3'd4) ? rtr_hfa :
 			            (rtr_k == 3'd5) ? {rtr_hff, 24'd0} : rtr_hfpc;
 			dd_req   <= ~dd_req;
-			if (rtr_hw && rtr_k == 3'd6) rtr_hdr <= 1'b1;
-			rtr_i    <= rtr_i + 1'd1;
+			if (rtr_in && rtr_i[7:0] == 8'hFF) rtr_hdr <= 1'b1;
+			rtr_i    <= (rtr_hw && rtr_k == 3'd6) ? 10'd512 : rtr_i + 1'd1;
 		end
 		else if (bus_go && bus_rdy && !beat_new && !dd_busy) begin
 			// the bus ring, a word at a time, after the retired-PC ring

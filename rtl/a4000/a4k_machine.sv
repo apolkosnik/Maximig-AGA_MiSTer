@@ -244,7 +244,7 @@ ap68040 cpu
 	.br_n(), .bg_n(1'b0), .bb_n_i(1'b1), .bb_n_o(), .bb_oe(),
 	.rsto_n(cpu_rsto_n), .cdis_n(1'b1), .mdis_n(1'b1), .ipend_n(), .pst(),
 
-	.dbg_pc(dbg_pc), .dbg_retire(dbg_retire), .dbg_xgo(dbg_xgo), .dbg_xvec(dbg_xvec), .dbg_xpc(dbg_xpc),
+	.dbg_pc(dbg_pc), .dbg_retire(dbg_retire), .dbg_rinfo(dbg_rinfo), .dbg_xgo(dbg_xgo), .dbg_xvec(dbg_xvec), .dbg_xpc(dbg_xpc),
 	.dbg_hfgo(dbg_hfgo), .dbg_hfld(dbg_hfld), .dbg_hfa(dbg_hfa), .dbg_hff(dbg_hff), .dbg_hfpc(dbg_hfpc),
 	.dbg_ev(dbg_ev), .dbg_evpc(dbg_evpc),
 	.dbg_halted(dbg_halted)
@@ -381,11 +381,15 @@ localparam RTR_ILL = 1'b1;
 localparam RTR_ILL = 1'b0;
 `endif
 wire [31:0] rtr_rd;
-wire  [8:0] rtr_ra;
+wire  [9:0] rtr_ra;
 // the front end's last 32 events (redirects, the BTB's, exception entry,
 // the handler fetch), with the ring's next slot at each
 wire  [2:0] dbg_ev;
 wire [31:0] dbg_evpc;
+// the retired uop: dbg_retire is registered at the commit, so its PC is
+// the previous clock's dbg_pc; dbg_rinfo comes with it
+wire [15:0] dbg_rinfo;
+reg  [31:0] dbg_pc_d = 32'd0;
 reg   [7:0] rtr_wp = 8'd0;
 reg         rtr_frz = 1'b0;
 `ifndef MAXIMIG_RTR_ARM_BITS
@@ -395,8 +399,11 @@ reg  [`MAXIMIG_RTR_ARM_BITS:0] rtr_cnt = '0;
 wire        rtr_arm = rtr_cnt[`MAXIMIG_RTR_ARM_BITS];
 `ifdef MAXIMIG_PCSAMPLE
 reg  [31:0] rtr_ram [256];
+reg  [15:0] rtr_ram2 [256];      // the uop's info with each PC
 reg  [31:0] rtr_q;
+reg  [15:0] rtr_q2;
 always @(posedge clk_cpu) begin
+	dbg_pc_d <= dbg_pc;
 	if (!rtr_frz) begin
 		if (dbg_xgo) begin
 			rtr_xvec <= dbg_xvec;
@@ -410,18 +417,19 @@ always @(posedge clk_cpu) begin
 		end
 		if (rtr_arm && (!cpu_rsti_n || !cpu_rsto_n || dbg_halted || (RTR_ILL && dbg_xgo && dbg_xvec == 8'd4))) rtr_frz <= 1'b1;
 		else if (dbg_retire) begin
-			rtr_ram[rtr_wp] <= dbg_pc;
+			rtr_ram[rtr_wp]  <= dbg_pc_d;
+			rtr_ram2[rtr_wp] <= dbg_rinfo;
 			rtr_wp <= rtr_wp + 1'd1;
 			if (!rtr_arm) rtr_cnt <= rtr_cnt + 1'd1;
 			// (an exception's entry retires at PC 0: not a runaway)
-			else if (dbg_pc[31:10] == 22'd0 && dbg_pc[9:0] != 10'd0) rtr_frz <= 1'b1;
+			else if (dbg_pc_d[31:10] == 22'd0 && dbg_pc_d[9:0] != 10'd0) rtr_frz <= 1'b1;
 			// (Kickstart's entry, $F800D0-$F800D2, reached by a jump rather
 			// than a reset: a runaway into a cold start)
-			else if (dbg_pc[31:8] == 24'h00F800) rtr_frz <= 1'b1;
+			else if (dbg_pc_d[31:8] == 24'h00F800) rtr_frz <= 1'b1;
 			// (nothing runs above the Zorro III RAM boards, $58000000 up: the
 			// RTG board, autoconfig space -- a runaway through a stale return
 			// address lands there before it reaches low memory)
-			else if (dbg_pc[31:27] >= 5'd11) rtr_frz <= 1'b1;
+			else if (dbg_pc_d[31:27] >= 5'd11) rtr_frz <= 1'b1;
 		end
 	end
 end
@@ -439,12 +447,13 @@ always @(posedge clk_cpu)
 wire  [4:0] ev_ri = ev_wp + rtr_ra[5:1];             // oldest first
 always @(posedge clk_57) begin
 	rtr_q  <= rtr_ram[rtr_ra[7:0]];
+	rtr_q2 <= rtr_ram2[rtr_ra[7:0]];
 	ev_qa  <= ev_a[ev_ri];
 	ev_qb  <= ev_b[ev_ri];
 	ev_sel <= rtr_ra[8];
 	ev_w   <= rtr_ra[0];
 end
-assign rtr_rd = ev_sel ? (ev_w ? ev_qb : ev_qa) : rtr_q;
+assign rtr_rd = ev_sel ? (ev_w ? ev_qb : ev_qa) : rtr_ra[9] ? {16'd0, rtr_q2} : rtr_q;
 `else
 assign rtr_rd = 32'd0;
 `endif
