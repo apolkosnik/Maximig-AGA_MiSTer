@@ -372,6 +372,7 @@ int main(int argc, char **argv)
 	uint32_t ddd_addr = 0, ddd_len = 0;
 	const char *ddd_file = nullptr;
 	long pctrace = 0;
+	int mainreset = -1;          // mark 7: Main's reset, the machine running for this many clk_sys cycles halted
 	Video video;
 	for (int i = 1; i < argc; i++) {
 		std::string a = argv[i];
@@ -401,6 +402,7 @@ int main(int argc, char **argv)
 		else if (a == "--ddrpeek") ddrpeek.push_back((uint32_t)strtoul(next(), nullptr, 0));
 		else if (a == "--ddrdump") { ddd_addr = strtoul(next(), nullptr, 0); ddd_len = strtoul(next(), nullptr, 0); ddd_file = next(); }
 		else if (a == "--freeze-ms") freeze_ms = atof(next());
+		else if (a == "--mainreset") mainreset = atoi(next());
 #if VM_TRACE
 		else if (a == "--vcd") {
 			Verilated::traceEverOn(true);
@@ -526,6 +528,18 @@ int main(int argc, char **argv)
 						if (d == 4) { key_at = halfstep; printf("[hrtmon] the HRTmon key\n"); }
 						if (d == 5) video.colour_req = 2;   // the next complete frame
 						if (d == 6) video.edge_req = 2;
+						if (d == 7 && mainreset >= 0) {
+							// minimig_reset's ApplyConfiguration(0): halt, the
+							// configuration written with the machine running, then
+							// HLT|RST_CPU|RST_USR, then 0
+							printf("[reset] Main's reset at %.4f ms\n", sim_ms()); fflush(stdout);
+							uio_cmd({0xF1, 0x04});
+							idle_sys(mainreset);
+							uio_cmd({0xF1, 0x07});
+							idle_sys(1000);
+							uio_cmd({0xF1, 0x00});
+							printf("[reset] released at %.4f ms\n", sim_ms()); fflush(stdout);
+						}
 					}
 				}
 			}

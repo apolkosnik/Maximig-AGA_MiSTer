@@ -38,7 +38,8 @@ module a4k_budgie
 )
 (
 	input             clk,          // clk_sys, 28 MHz
-	input             reset,
+	input             reset,        // the MiSTer's (configuration, the PLL)
+	input             sys_reset,    // the system's (_cpu_reset: OSD, keyboard, power-up)
 	input             fast,         // no added wait states
 	input             clk7_en,      // 7 MHz (amiga_clk)
 	input             cck,          // colour clock (amiga_clk)
@@ -138,11 +139,17 @@ endtask
 wire [3:0] ide_reg  = {sb_addr[12], sb_addr[4:2]};
 wire       ide_istat = sb_addr[12] && sb_addr[4:2] == 3'd0;
 
+// The system reset ends a cycle in progress too: a chip-bus cycle started
+// while Main halts the bridge (minimig_reset: HLT, the configuration with
+// the machine running, then RST) gets no DTACK, and the bridge leaves the
+// halt only with AS negated -- held, the chip bus stayed dead after the
+// reset (Kickstart stopped at its first CIA access, the power LED dim).
+// The handshake is a4k_lbus's to square (it is reset with the system).
 always @(posedge clk) begin
 	cck_d <= cck;
-	if (reset) begin
+	if (reset || sys_reset) begin
 		st        <= S_IDLE;
-		sb_ack    <= sb_req;
+		if (reset) sb_ack <= sb_req;
 		pst       <= 1'b0;
 		cpu_as_n  <= 1'b1;
 		cpu_uds_n <= 1'b1;

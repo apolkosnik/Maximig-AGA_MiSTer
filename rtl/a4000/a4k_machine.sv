@@ -588,6 +588,7 @@ a4k_budgie budgie
 (
 	.clk(clk_sys),
 	.reset(reset),
+	.sys_reset(~sys_rst_n),
 	.fast(bus_fast),
 	.clk7_en(clk7_en),
 	.cck(cck),
