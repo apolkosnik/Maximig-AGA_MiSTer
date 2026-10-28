@@ -75,6 +75,42 @@ slave (both instantiated in `a4k_machine`):
   RAM is not snooped, as on the real machine (the OS flushes caches around
   DMA).
 
+## The BFG9060 card (`a4k_bfg9060`)
+
+The OSD's CPU item also offers Matthias Heinrichs' BFG9060
+(gitlab.com/MHeinrichs/a4000-tk) with a 68040, at 25 or 37.5 MHz (its two
+68040 firmwares; 50 MHz too).  The choice is the status bit 54 (Main's
+ext_cfg bit 22), taken while the machine is in reset; both cards are
+built, the other one held in reset.  From the card's CPLD sources
+(`mcp.vhd`, `control.vhd`, `ramcon.vhd`, `bus_sizing.vhd`, master with
+`FOR_68060 = 0`):
+
+* 128 MB of SDRAM on the card at `$08000000-$0FFFFFFF`, no AUTOCONFIG:
+  Kickstart sizes it as CPU-slot RAM (and puts ExecBase there).  Here it
+  is DDR3 at `0x28000000`, the 128 MB Zorro III board's memory, so that
+  board is not fitted with the BFG9060.  The card keeps the SDRAM
+  controller's time: counted in bus clocks from TS, a read's first TA at
+  3 and a burst's next ones a clock apart (3-1-1-1), a write's at 2, then
+  1-1-1, a refresh of 3 clocks every 6.4 us.  The data comes from DDR3
+  through the local bus (`lb_local`, its whole line in `lb_rline`); a read
+  waits for it, so DDR3's latency (and the A2065's mailbox polling of the
+  same port) makes reads slower than the real card's.  Writes are posted,
+  four deep.
+* Everything else is a 68030 cycle on the motherboard per long word, as
+  on the A3640, with TBI asserted with the first TA of a line (bursts only
+  on the card).  TCI: data is cache-inhibited except in the card's RAM,
+  `$01000000-$07FFFFFF`, `$10000000-$7FFFFFFF` and `$00Fxxxxx`, so chip
+  RAM's data is not cached and Zorro III space is; instruction fetches are
+  never inhibited.
+* The flash at `$F00000-$F7FFFF`, an 8-bit port at four motherboard
+  clocks a byte: Henryk Richter's boot code V1.5 (`bfg9060_rom.svh`, from
+  `BFGFlash/bootrom.bin`), read-only, the rest erased.  It runs the colour
+  bars (about 2 s, from the flash, uncached), turns off a full 68060's FPU
+  and adds the 2588/$3C ConfigDev.
+* The firmware ID: `$FF040008` reads `$BF690601`; `$FF0400xx` is answered
+  32 bits wide by the card.
+* Interrupt acknowledge: TA with AVEC a bus clock after TS, on the card.
+
 ## The local bus (`a4k_lbus`): Gary, Ramsey, Budgie, Buster
 
 One beat at a time arrives from the card: 32-bit address, byte enables,
@@ -195,7 +231,7 @@ III cycles take Buster's FCS/DTACK cycle plus the board's own wait states
 |---|---|
 | `0x20000000-0x207FFFFF` | MiSTer scaler (sys) |
 | `0x27000000-0x277FFFFF` | RTG framebuffer |
-| `0x28000000-0x2FFFFFFF` | Zorro III fast RAM board, 128 MB |
+| `0x28000000-0x2FFFFFFF` | Zorro III fast RAM board, 128 MB, or the BFG9060's 128 MB |
 | `0x30000000-0x3FFFFFFF` | Zorro III fast RAM board, 256 MB |
 
 ## Timing (A4000 bus mode)

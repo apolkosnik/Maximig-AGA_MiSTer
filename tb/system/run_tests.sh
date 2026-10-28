@@ -5,6 +5,9 @@
 #             ROM reports PASS/FAIL through the mailbox
 #   t_chipset Denise, the CIAs: behaviour the board test does not reach
 #   t_hrtmon_mmu  HRTmon's NMI entry with the vector table MMU-translated
+#   t_bfg     the BFG9060 card: its firmware ID, flash, 128 MB at $08000000,
+#             MOVE16, interrupts, TCI (chip RAM data not cached), at 25 and
+#             37.5 MHz
 #   t_reset   Main's reset (halt, the configuration, reset) with the CPU on
 #             the chip bus: the machine must boot again
 #   t_ar      the Action Replay cartridge (AR5's DeMoN v2 layout): its freezes
@@ -31,7 +34,7 @@ set -e
 cd "$(dirname "$0")"
 OBJ=${OBJ:-obj_tests}
 OBJ=$OBJ ./build.sh > build_tests.log 2>&1 || { tail -30 build_tests.log; exit 1; }
-../asm/build.sh t_board t_timing hrtmon_stub t_hrtmon_mmu extrom_pattern t_chipset t_ar ar_stub t_rtr t_reset > /dev/null
+../asm/build.sh t_board t_timing hrtmon_stub t_hrtmon_mmu extrom_pattern t_chipset t_ar ar_stub t_rtr t_reset t_bfg > /dev/null
 
 fail=0
 out=$(timeout 1800 ./$OBJ/Vtb_top --rom ../asm/build/t_board.rom --cart ../asm/build/hrtmon_stub.bin --extrom ../asm/build/extrom_pattern.bin --ms 400 --quiet 2>&1) || true
@@ -50,6 +53,12 @@ if echo "$out" | grep -q '^\[mailbox\].*result 600D'; then echo "t_hrtmon_mmu PA
 
 out=$(timeout 1800 ./$OBJ/Vtb_top --rom ../asm/build/t_ar.rom --ar ../asm/build/ar_stub.bin --ms 300 --quiet 2>&1) || true
 if echo "$out" | grep -q '^\[mailbox\].*result 600D'; then echo "t_ar PASS"; else echo "$out" | grep -v '^\[sim\]'; echo "t_ar FAIL"; fail=1; fi
+
+# the BFG9060 card in place of the A3640
+for sp in 0 1; do
+	out=$(timeout 1800 ./$OBJ/Vtb_top --rom ../asm/build/t_bfg.rom --bfg --speed $sp --ms 150 --quiet 2>&1) || true
+	if echo "$out" | grep -q '^\[mailbox\].*result 600D'; then echo "t_bfg (speed $sp) PASS"; else echo "$out" | grep -v '^\[sim\]'; echo "t_bfg (speed $sp) FAIL"; fail=1; fi
+done
 
 # Main's reset: the halt window short (Main's commands alone) and long (an
 # Action Replay upload)

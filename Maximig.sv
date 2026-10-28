@@ -377,6 +377,7 @@ a4k_machine machine
 	.toccata_r        (toccata_aud_right),
 	.dsnd_volume      (status[52:51]),
 	.cart_ar          (status[53]),
+	.card_bfg         (status[54]),
 	.dsnd_l           (dsnd_l),
 	.dsnd_r           (dsnd_r),
 

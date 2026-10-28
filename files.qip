@@ -3,6 +3,7 @@ set_global_assignment -name QIP_FILE rtl/minimig/minimig.qip
 set_global_assignment -name VERILOG_FILE rtl/a4000/dpram.v
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/a4000/a4k_cpuclk.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/a4000/a4k_a3640.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/a4000/a4k_bfg9060.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/a4000/a4k_buster.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/a4000/a4k_lbus.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/a4000/a4k_budgie.sv

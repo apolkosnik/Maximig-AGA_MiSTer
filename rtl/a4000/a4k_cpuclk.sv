@@ -20,6 +20,7 @@
 //    2  5/7   40.5 MHz
 //    3  8/9   50.4 MHz
 //    4  1/1   56.75 MHz
+//    5  2/3   37.8 MHz   the BFG9060's 37.5 MHz 68040 firmware
 //============================================================================
 
 module a4k_cpuclk
@@ -37,6 +38,7 @@ always @(*) begin
 		3'd1:    begin num = 4'd7; den = 4'd12; end
 		3'd2:    begin num = 4'd5; den = 4'd7;  end
 		3'd3:    begin num = 4'd8; den = 4'd9;  end
+		3'd5:    begin num = 4'd2; den = 4'd3;  end
 		default: begin num = 4'd1; den = 4'd1;  end
 	endcase
 end

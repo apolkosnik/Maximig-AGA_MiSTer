@@ -372,7 +372,8 @@ int main(int argc, char **argv)
 	uint32_t ddd_addr = 0, ddd_len = 0;
 	const char *ddd_file = nullptr;
 	long pctrace = 0;
-	int mainreset = -1;          // mark 7: Main's reset, the machine running for this many clk_sys cycles halted
+	int mainreset = -1;
+	bool bfg = false;            // the BFG9060 card in place of the A3640          // mark 7: Main's reset, the machine running for this many clk_sys cycles halted
 	Video video;
 	for (int i = 1; i < argc; i++) {
 		std::string a = argv[i];
@@ -403,6 +404,7 @@ int main(int argc, char **argv)
 		else if (a == "--ddrdump") { ddd_addr = strtoul(next(), nullptr, 0); ddd_len = strtoul(next(), nullptr, 0); ddd_file = next(); }
 		else if (a == "--freeze-ms") freeze_ms = atof(next());
 		else if (a == "--mainreset") mainreset = atoi(next());
+		else if (a == "--bfg") bfg = true;
 #if VM_TRACE
 		else if (a == "--vcd") {
 			Verilated::traceEverOn(true);
@@ -424,6 +426,7 @@ int main(int argc, char **argv)
 	for (int i = 0; i < 3; i++) top->rtc[i] = 0;
 	top->kbd_mouse_data = 0; top->kbd_mouse_type = 0; top->kbd_mouse_level = 0;
 	top->cart_ar = arrom != nullptr;
+	top->card_bfg = bfg;
 	idle_sys(64);
 	if (!load_rom(rom)) return 2;
 	top->reset = 0;

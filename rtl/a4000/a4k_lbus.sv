@@ -88,7 +88,9 @@ module a4k_lbus
 	input       [1:0] lb_beat,
 	input       [1:0] lb_tt,
 	input       [2:0] lb_tm,
+	input             lb_local,      // the BFG9060's own RAM ($08000000-$0FFFFFFF, its card decodes it)
 	output reg [31:0] lb_rdata,
+	output    [127:0] lb_rline,      // the DDR3 line of the last read (the BFG9060's bursts)
 	output reg        lb_berr,
 	output reg        lb_ci,
 
@@ -174,7 +176,8 @@ localparam [4:0]
 	T_NMIV   = 5'd21,  // the HRTmon cartridge's NMI vector
 	T_CART   = 5'd22,  // SDRAM: the HRTmon cartridge's RAM
 	T_GIEN   = 5'd23,  // Gary's interrupt enable ($DF8000-$DFBFFF)
-	T_AR     = 5'd24;  // SDRAM: the Action Replay's ROM and RAM
+	T_AR     = 5'd24,  // SDRAM: the Action Replay's ROM and RAM
+	T_BFGRAM = 5'd25;  // DDR3: the BFG9060's 128 MB (the 128 MB Zorro III board's space)
 
 // slow bus target numbers (a4k_budgie)
 localparam [2:0] SB_CHIP = 3'd0, SB_CREG = 3'd1, SB_CIA = 3'd2, SB_RTC = 3'd3,
@@ -279,6 +282,9 @@ always @(*) begin
 		if (rtgb_ena && a[31:24] == rtgb_base)
 			dec = !a[23] ? T_RTGFB : (a[22:16] == 7'd0) ? T_RTGREG : T_NONE;
 	end
+	// (the NMI vector fetch is the cartridge's wherever VBR is, the BFG9060's
+	// RAM too)
+	if (lb_local) dec = T_BFGRAM;
 	if (nmi_arm && !lb_we && lb_tt == 2'b00 && lb_tm == 3'd5) dec = T_NMIV;
 end
 
@@ -287,7 +293,7 @@ end
 // framebuffer and mailbox behind the 68040's back
 function automatic inhibited(input [4:0] t);
 	case (t)
-		T_CHIP, T_ROM, T_MBRAM, T_MBNONE, T_Z3R256, T_Z3R128: inhibited = 1'b0;
+		T_CHIP, T_ROM, T_MBRAM, T_MBNONE, T_Z3R256, T_Z3R128, T_BFGRAM: inhibited = 1'b0;
 		default:                                               inhibited = 1'b1;
 	endcase
 endfunction
@@ -446,13 +452,18 @@ reg  [28:2] dd_byte;
 always @(*) begin
 	case (dec)
 		T_Z3R256: dd_byte = {1'b1, lb_addr[27:2]};                              // 0x30000000 + offset
-		T_Z3R128: dd_byte = {2'b01, lb_addr[26:2]};                             // 0x28000000 + offset
+		T_Z3R128,
+		T_BFGRAM: dd_byte = {2'b01, lb_addr[26:2]};                             // 0x28000000 + offset
 		T_SHARE:  dd_byte = {13'h07FF, lb_addr[15:2]};                          // 0x27FF0000 + offset
 		default:  dd_byte = {6'b001110, lb_addr[22:2]};                         // 0x27000000 + offset
 	endcase
 end
 
 wire beat_new = (lb_req != lb_ack) && st == S_IDLE;
+
+// the BFG9060 card's burst: the whole line its read fetched (a4k_ddr3 holds
+// it until the next DDR3 read)
+assign lb_rline = dd_rdata;
 
 // The PC sampler, a debug aid on real hardware: every 2^12 clk_57 cycles
 // (72 us) the CPU's PC goes to a ring of 64 long words in DDR3 at
@@ -795,8 +806,9 @@ always @(posedge clk) begin
 					need <= fast ? 6'd0 : ramsey_cfg[4] ? 6'd4 : 6'd5;
 					st   <= S_WAIT;
 				end
-				T_Z3R256, T_Z3R128, T_RTGFB, T_SHARE: begin
-					need <= fast ? 6'd0 : (dec == T_RTGFB || dec == T_SHARE) ? CYC_RTG : CYC_Z3RAM;
+				T_Z3R256, T_Z3R128, T_RTGFB, T_SHARE, T_BFGRAM: begin
+					// (the BFG9060's RAM: its card keeps the time)
+					need <= (fast || dec == T_BFGRAM) ? 6'd0 : (dec == T_RTGFB || dec == T_SHARE) ? CYC_RTG : CYC_Z3RAM;
 					if (!lb_we && ddb_v && (lb_line && lb_beat != 2'd0) && ddb_a == dd_byte[28:4]) begin
 						rdata <= l_long(ddb_d, dd_byte[3:2]);
 						st    <= S_WAIT;

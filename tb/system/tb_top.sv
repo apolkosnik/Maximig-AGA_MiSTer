@@ -24,6 +24,7 @@ module tb_top
 	input       [1:0] kbd_mouse_type,
 	input             kbd_mouse_level,
 	input             cart_ar,       // the cartridge: the Action Replay, not HRTmon
+	input             card_bfg,      // the CPU card: the BFG9060, not the A3640
 
 	// video
 	output            hs_n,
@@ -141,6 +142,7 @@ a4k_machine machine
 	.toccata_r        (),
 	.dsnd_volume      (2'd0),
 	.cart_ar          (cart_ar),
+	.card_bfg         (card_bfg),
 	.dsnd_l           (),
 	.dsnd_r           (),
 

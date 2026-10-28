@@ -94,6 +94,7 @@ module a4k_machine
 	output     [15:0] toccata_r,
 	input       [1:0] dsnd_volume,
 	input             cart_ar,       // the cartridge: 0 HRTmon, 1 the Action Replay (AR5, DeMoN v2)
+	input             card_bfg,      // the CPU card: 0 the A3640, 1 the BFG9060 (68040); taken at a reset
 	output     [15:0] dsnd_l,
 	output     [15:0] dsnd_r,
 
@@ -170,13 +171,17 @@ wire  [6:0] memcfg;
 wire  [5:0] chipsetcfg;
 wire  [5:0] idecfg;
 
-// CPU clock: TT 0 25 MHz (A3640), 1 33 MHz, 2 50 MHz, 3 56.75 MHz; SS 01: 40 MHz
+// the CPU card, taken at a system reset: the A3640 or the BFG9060
+reg        bfg = 1'b0;
+
+// CPU clock: TT 0 25 MHz (A3640), 1 33 MHz (the BFG9060: 37.5 MHz, its
+// 68040 firmware's other clock), 2 50 MHz, 3 56.75 MHz; SS 01: 40 MHz
 reg [2:0] cpu_speed;
 always @(posedge clk_57) begin
 	if (cpucfg[4:3] == 2'b01) cpu_speed <= 3'd2;
 	else case (cpucfg[1:0])
 		2'd0: cpu_speed <= 3'd0;
-		2'd1: cpu_speed <= 3'd1;
+		2'd1: cpu_speed <= bfg ? 3'd5 : 3'd1;
 		2'd2: cpu_speed <= 3'd3;
 		2'd3: cpu_speed <= 3'd4;
 	endcase
@@ -186,7 +191,7 @@ wire       bus_fast = cpucfg[2];                       // P: Fast bus timing
 wire [1:0] mbram    = memcfg[3:2];                     // SS: motherboard RAM
 wire [2:0] z3cfg    = {memcfg[6], memcfg[5:4]};        // FF + bit 7: Zorro III RAM
 wire       z3ram256_fit = (z3cfg >= 3'd4);
-wire       z3ram128_fit = (z3cfg != 3'd0) && (z3cfg != 3'd4);
+wire       z3ram128_fit = (z3cfg != 3'd0) && (z3cfg != 3'd4) && !bfg;   // (the BFG9060's RAM takes its DDR3)
 
 //////////////////////////////  the CPU card  ////////////////////////////
 
@@ -221,6 +226,13 @@ wire  [2:0] c_tm;
 // the CPU's reset input, on its own clock's edges
 reg cpu_rsti_n = 1'b0;
 always @(posedge clk_57) if (cpu_ce) cpu_rsti_n <= sys_rst_n;
+
+// the card choice (an OSD status bit) only while the machine is in reset
+reg [1:0] card_bfg_s = 2'b00;
+always @(posedge clk_57) begin
+	card_bfg_s <= {card_bfg_s[0], card_bfg};
+	if (!cpu_rsti_n) bfg <= card_bfg_s[1];
+end
 
 // the RESET instruction for the clk_sys boards (IDE, A2065, Toccata), taken
 // on clk_sys (the chipset takes its own)
@@ -260,7 +272,8 @@ ap68040 #(.DEBUG(CPU_DEBUG)) cpu
 	.dbg_halted(dbg_halted)
 );
 
-wire        lb_req, lb_ack, lb_we, lb_line, lb_berr, lb_ci;
+wire        lb_req, lb_ack, lb_we, lb_line, lb_berr, lb_ci, lb_local;
+wire[127:0] lb_rline;
 wire [31:2] lb_addr;
 wire  [3:0] lb_be;
 wire [31:0] lb_wdata, lb_rdata;
@@ -272,11 +285,23 @@ wire  [2:0] lb_tm;
 wire  [2:0] card_pre  = 3'd0;
 wire  [2:0] card_post = 3'd0;
 
+// the two cards answer the same CPU bus; the one not chosen is held in reset
+// (its local bus request then follows the acknowledge)
+wire [31:0] a_di, b_di;
+wire        a_ta_n, a_tea_n, a_tci_n, a_tbi_n, a_avec_n, a_iack7_t;
+wire        b_ta_n, b_tea_n, b_tci_n, b_tbi_n, b_avec_n, b_iack7_t;
+wire        a_lb_req, a_lb_we, a_lb_line, b_lb_req, b_lb_we, b_lb_line;
+wire [31:2] a_lb_addr, b_lb_addr;
+wire  [3:0] a_lb_be, b_lb_be;
+wire [31:0] a_lb_wdata, b_lb_wdata;
+wire  [1:0] a_lb_beat, b_lb_beat, a_lb_tt, b_lb_tt;
+wire  [2:0] a_lb_tm, b_lb_tm;
+
 a4k_a3640 a3640
 (
 	.clk(clk_57),
 	.ce(cpu_ce),
-	.reset(~cpu_rsti_n),
+	.reset(~cpu_rsti_n | bfg),
 
 	.a(c_a),
 	.ts_n(c_ts_n),
@@ -286,33 +311,93 @@ a4k_a3640 a3640
 	.tm(c_tm),
 	.d_cpu(c_do),
 
-	.d_mem(c_di),
-	.ta_n(c_ta_n),
-	.tea_n(c_tea_n),
-	.tci_n(c_tci_n),
-	.tbi_n(c_tbi_n),
-	.avec_n(c_avec_n),
-	.iack7_t(iack7_t),
+	.d_mem(a_di),
+	.ta_n(a_ta_n),
+	.tea_n(a_tea_n),
+	.tci_n(a_tci_n),
+	.tbi_n(a_tbi_n),
+	.avec_n(a_avec_n),
+	.iack7_t(a_iack7_t),
 
 	.pre(card_pre),
 	.post(card_post),
 
-	.lb_req(lb_req),
+	.lb_req(a_lb_req),
 	.lb_ack(lb_ack),
-	.lb_addr(lb_addr),
-	.lb_be(lb_be),
-	.lb_we(lb_we),
-	.lb_wdata(lb_wdata),
-	.lb_line(lb_line),
-	.lb_beat(lb_beat),
-	.lb_tt(lb_tt),
-	.lb_tm(lb_tm),
+	.lb_addr(a_lb_addr),
+	.lb_be(a_lb_be),
+	.lb_we(a_lb_we),
+	.lb_wdata(a_lb_wdata),
+	.lb_line(a_lb_line),
+	.lb_beat(a_lb_beat),
+	.lb_tt(a_lb_tt),
+	.lb_tm(a_lb_tm),
 	.lb_rdata(lb_rdata),
 	.lb_berr(lb_berr),
 	.lb_ci(lb_ci),
 
 	.dbg_state()
 );
+
+a4k_bfg9060 bfg9060
+(
+	.clk(clk_57),
+	.ce(cpu_ce),
+	.reset(~cpu_rsti_n | !bfg),
+
+	.a(c_a),
+	.ts_n(c_ts_n),
+	.rw_n(c_rw_n),
+	.siz(c_siz),
+	.tt(c_tt),
+	.tm(c_tm),
+	.d_cpu(c_do),
+
+	.d_mem(b_di),
+	.ta_n(b_ta_n),
+	.tea_n(b_tea_n),
+	.tci_n(b_tci_n),
+	.tbi_n(b_tbi_n),
+	.avec_n(b_avec_n),
+	.iack7_t(b_iack7_t),
+
+	.pre(card_pre),
+	.post(card_post),
+
+	.lb_req(b_lb_req),
+	.lb_ack(lb_ack),
+	.lb_addr(b_lb_addr),
+	.lb_be(b_lb_be),
+	.lb_we(b_lb_we),
+	.lb_wdata(b_lb_wdata),
+	.lb_line(b_lb_line),
+	.lb_beat(b_lb_beat),
+	.lb_tt(b_lb_tt),
+	.lb_tm(b_lb_tm),
+	.lb_local(lb_local),
+	.lb_rdata(lb_rdata),
+	.lb_berr(lb_berr),
+	.lb_rline(lb_rline),
+
+	.dbg_state()
+);
+
+assign c_di     = bfg ? b_di     : a_di;
+assign c_ta_n   = bfg ? b_ta_n   : a_ta_n;
+assign c_tea_n  = bfg ? b_tea_n  : a_tea_n;
+assign c_tci_n  = bfg ? b_tci_n  : a_tci_n;
+assign c_tbi_n  = bfg ? b_tbi_n  : a_tbi_n;
+assign c_avec_n = bfg ? b_avec_n : a_avec_n;
+assign iack7_t  = a_iack7_t ^ b_iack7_t;
+assign lb_req   = bfg ? b_lb_req   : a_lb_req;
+assign lb_addr  = bfg ? b_lb_addr  : a_lb_addr;
+assign lb_be    = bfg ? b_lb_be    : a_lb_be;
+assign lb_we    = bfg ? b_lb_we    : a_lb_we;
+assign lb_wdata = bfg ? b_lb_wdata : a_lb_wdata;
+assign lb_line  = bfg ? b_lb_line  : a_lb_line;
+assign lb_beat  = bfg ? b_lb_beat  : a_lb_beat;
+assign lb_tt    = bfg ? b_lb_tt    : a_lb_tt;
+assign lb_tm    = bfg ? b_lb_tm    : a_lb_tm;
 
 // a beat terminating on the local bus, for the simulation's bus trace
 reg lb_ack_d;
@@ -513,7 +598,9 @@ a4k_lbus lbus
 	.lb_beat(lb_beat),
 	.lb_tt(lb_tt),
 	.lb_tm(lb_tm),
+	.lb_local(lb_local),
 	.lb_rdata(lb_rdata),
+	.lb_rline(lb_rline),
 	.lb_berr(lb_berr),
 	.lb_ci(lb_ci),
 
