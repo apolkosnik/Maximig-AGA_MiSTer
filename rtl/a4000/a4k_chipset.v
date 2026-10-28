@@ -229,6 +229,7 @@ assign      IO_DOUT = IO_DOUT_PAULA;
 assign      IO_WAIT = IO_WAIT_PAULA | IO_WAIT_OSD;
 
 wire        bls;
+wire        blit_nasty;         // Agnus: a BLTPRI blit runs (the CPU's blitter register writes wait)
 wire        cpurst;
 wire  [2:0] _iplx;
 wire        usrrst;
@@ -317,6 +318,7 @@ agnus AGNUS1
 	.harddis(harddis),
 	.varbeamen(varbeamen),
 	.int3(int3),
+	.blit_nasty(blit_nasty),
 	.audio_dmal(audio_dmal),
 	.audio_dmas(audio_dmas),
 	.disk_dmal(disk_dmal),
@@ -543,6 +545,7 @@ minimig_m68k_bridge CPU1
 	.xbs(1'b1),
 	.nrdy(1'b0),
 	.bls(bls),
+	.blit_nasty(blit_nasty),
 	.memory_config(4'b0011),
 	._as(_cpu_as),
 	._lds(_cpu_lds),

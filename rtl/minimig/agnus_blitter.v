@@ -92,6 +92,7 @@ module agnus_blitter
 	output	reg busy,					// blitter busy status
 	output	int3,						// blitter finish interrupt request
 	output	int3_flush,					// INT3 with the final D still to write (AGA), from registers only
+	output	active,						// a blit is running (not frozen)
 	input 	[15:0] data_in,	    		// bus data in
 	output	[15:0] data_out,			// bus data out
 	input 	[8:1] reg_address_in,		// register address inputs
@@ -548,6 +549,7 @@ always @(posedge clk)
 
 // blitter finish interrupt request
 assign int3 = done_end;
+assign active = (busy | |blt_state) & (blt_state != BLT_FROZEN);
 
 // FSM start control (one bus clock cycle delay for cycle exact compatibility)
 always @(posedge clk)

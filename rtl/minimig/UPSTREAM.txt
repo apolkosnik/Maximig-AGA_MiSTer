@@ -1,4 +1,10 @@
-4767064f229a8ea856e643027aed7246263bb118 2026-10-22 Revert "Fix RTG with the 68030 MMU enabled (#281)" (#284)
+06db70b 2026-10-27 CD read speed; fix CPU (Pierre le Chef) and Denise (Alien 3)
+(from 4767064, 2026-10-22: 8813609 the blitter (Deep Core) -- a CPU write to
+a blitter register waits while a BLTPRI blit runs, wired in a4k_chipset;
+c1f14c3 Denise's BPLAM up to the last pixel of the window.  Not taken:
+4ab0d5f, the AGA sprite fine position (the same fix is here, below, as the
+output delay); sdram_ctrl's de795a7 and 5306e18 (a4k_sdram has no CPU cache
+or write queue); the CPU, Akiko and DDR3 commits (not in this core))
 
 Local changes beyond the A4000 trimming: registers that were assigned with
 blocking '=' in clocked blocks and read by other blocks now use '<=' (the
