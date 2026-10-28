@@ -12,6 +12,10 @@
 #             the chip bus: the machine must boot again
 #   t_a3kp    the AA3000+ build: the DMAC+ registers, the DSP control latch
 #             (U124) and status, the chip RAM and ROM windows
+#   t_scsi    the AA3000+'s SCSI (WD33C93A, SuperDMAC DMA, the disks on IDE
+#             channel 0 as Main serves them): INQUIRY, READ CAPACITY, READ/
+#             WRITE, the unexpected phase and its resume, CHECK CONDITION and
+#             REQUEST SENSE, the selection timeout, the level-2 interrupt
 #   t_ar      the Action Replay cartridge (AR5's DeMoN v2 layout): its freezes
 #             (reset, CIA traps, the key), control register, register
 #             snapshot and stealth
@@ -76,6 +80,12 @@ OBJ=${OBJ}_a3kp ./build.sh -GA3000P=1 -GCPU_CARD=1 > build_tests_a3kp.log 2>&1 |
 ../asm/build.sh t_a3kp > /dev/null
 out=$(timeout 1800 ./${OBJ}_a3kp/Vtb_top --rom ../asm/build/t_a3kp.rom --ms 150 --quiet 2>&1) || true
 if echo "$out" | grep -q '^\[mailbox\].*result 600D'; then echo "t_a3kp PASS"; else echo "$out" | grep -v '^\[sim\]'; echo "t_a3kp FAIL"; fail=1; fi
+# its SCSI: the WD33C93A behind the SuperDMAC, the disks on IDE channel 0
+# with Main's side played by the bench (a fresh image each run: t_scsi writes)
+../asm/build.sh t_scsi > /dev/null
+PYTHONDONTWRITEBYTECODE=1 python3 mkhdf.py ${OBJ}_a3kp/t_scsi.hdf
+out=$(timeout 1800 ./${OBJ}_a3kp/Vtb_top --rom ../asm/build/t_scsi.rom --hdf ${OBJ}_a3kp/t_scsi.hdf --ms 200 --quiet 2>&1) || true
+if echo "$out" | grep -q '^\[mailbox\].*result 600D'; then echo "t_scsi PASS"; else echo "$out" | grep -v '^\[sim\]'; echo "t_scsi FAIL"; fail=1; fi
 
 # the PC sampler's recorder (a debug build: the macro MAXIMIG_PCSAMPLE, the
 # ring armed after 256 retires): t_rtr freezes it at $100, the DDR3 dump is

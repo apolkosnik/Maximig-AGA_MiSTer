@@ -24,7 +24,7 @@ CHIP_SRC="$M/agnus.v $M/agnus_spritedma.v $M/agnus_refresh.v $M/agnus_diskdma.v 
  $M/fpga-toccata/toccata_capture.sv $M/fpga-toccata/toccata_playback.sv $M/fpga-toccata/toccata_volume.sv
  $M/fpga-toccata/toccata_fifo.sv $M/fpga-toccata/toccata.sv"
 A4K_SRC="$R/rtl/a4000/dpram.v $R/rtl/a4000/a4k_cpuclk.sv $R/rtl/a4000/a4k_a3640.sv $R/rtl/a4000/a4k_bfg9060.sv $R/rtl/a4000/a4k_buster.sv
- $R/rtl/a4000/a4k_lbus.sv $R/rtl/a4000/a3kp_dmac.sv $R/rtl/a4000/a4k_budgie.sv $R/rtl/a4000/a4k_rtc.sv $R/rtl/a4000/a4k_sdram.sv
+ $R/rtl/a4000/a4k_lbus.sv $R/rtl/a4000/a3kp_dmac.sv $R/rtl/a4000/a3kp_sbic.sv $R/rtl/a4000/a3kp_scsi_disk.sv $R/rtl/a4000/a3kp_lbarb.sv $R/rtl/a4000/a4k_budgie.sv $R/rtl/a4000/a4k_rtc.sv $R/rtl/a4000/a4k_sdram.sv
  $R/rtl/a4000/a4k_ddr3.sv $R/rtl/a4000/a4k_chipset.v $R/rtl/a4000/a4k_machine.sv"
 SIMLIB_SRC="$R/tb/sim_lib/altsyncram.v"
 MACHINE_SRC="$CPU_SRC $SIMLIB_SRC $CHIP_SRC $A4K_SRC"

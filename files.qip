@@ -7,6 +7,9 @@ set_global_assignment -name SYSTEMVERILOG_FILE rtl/a4000/a4k_bfg9060.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/a4000/a4k_buster.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/a4000/a4k_lbus.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/a4000/a3kp_dmac.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/a4000/a3kp_sbic.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/a4000/a3kp_scsi_disk.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/a4000/a3kp_lbarb.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/a4000/a4k_budgie.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/a4000/a4k_rtc.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/a4000/a4k_sdram.sv

@@ -25,6 +25,14 @@ module tb_top
 	input      [15:0] io_din,
 	output     [15:0] io_dout,
 
+	// the IDE's management port, Main's side (sim_main plays Main)
+	input       [4:0] ide_mgmt_addr,
+	input             ide_mgmt_rd,
+	input             ide_mgmt_wr,
+	input      [15:0] ide_mgmt_wdata,
+	output     [15:0] ide_mgmt_rdata,
+	output      [5:0] ide_req,
+
 	input      [64:0] rtc,
 	input       [7:0] kbd_mouse_data,
 	input       [1:0] kbd_mouse_type,
@@ -96,12 +104,12 @@ a4k_machine #(.CPU_CARD(CPU_CARD), .A3000P(A3000P)) machine
 	.io_wait          (io_wait),
 	.io_din           (io_din),
 	.io_dout          (io_dout),
-	.ide_mgmt_addr    (5'd0),
-	.ide_mgmt_rd      (1'b0),
-	.ide_mgmt_wr      (1'b0),
-	.ide_mgmt_wdata   (16'd0),
-	.ide_mgmt_rdata   (),
-	.ide_req          (),
+	.ide_mgmt_addr    (ide_mgmt_addr),
+	.ide_mgmt_rd      (ide_mgmt_rd),
+	.ide_mgmt_wr      (ide_mgmt_wr),
+	.ide_mgmt_wdata   (ide_mgmt_wdata),
+	.ide_mgmt_rdata   (ide_mgmt_rdata),
+	.ide_req          (ide_req),
 	.ide_led          (),
 	.rtc              (rtc),
 

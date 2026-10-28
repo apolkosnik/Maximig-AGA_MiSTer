@@ -16,6 +16,10 @@
 //     --lbtrace         print every local-bus beat
 //     --lbtrace-from MS start the beat trace at MS milliseconds
 //     --pctrace N       print the PC every N clk_57 cycles
+//     --hdf FILE        a hard disk image on IDE channel 0's master (the A4000
+//                       port; the AA3000+'s SCSI ID 0), served as Main does;
+//                       --hdf1 its slave (SCSI ID 1), --hdf2 channel 1's master
+//                       (the AA3000+'s A4000 IDE port); --idetrace logs the commands
 //     --exctrace        print every exception the CPU takes: vector, the PC
 //                       and SR it stacks
 //     --iostat          bus beats per region every 100 ms
@@ -116,6 +120,177 @@ static void uio_cmd(const std::vector<uint8_t> &bytes)
 	}
 	top->io_uio = 0;
 	idle_sys(4);
+}
+
+//----------------------------------------------------------------------------
+// Main's IDE service (support/minimig ide handling): hard disk images on the
+// IDE channels' drives, through ide.v's management port as Main drives it
+// (the status word in register 5: bits 15/14/12/11/8 the status's BSY,
+// DRDY, DSC, DRQ, ERR, 13 fast read, 10 the interrupt, 9 the last block,
+// 7-0 the drive register; register 0: the error byte and the block size;
+// register 6: the drives present; register 15: the data, streamed).
+// The image's word order is the ARM's: a word holds its first byte low.
+//----------------------------------------------------------------------------
+struct Hdf {
+	FILE *f = nullptr;
+	uint32_t sectors = 0;
+	uint16_t cyl = 0, heads = 16, spt = 63;
+};
+static Hdf hdf[4];                      // channel 0 master/slave, channel 1 master/slave
+struct IdeCmd {
+	bool active = false;
+	uint8_t cmd = 0, drv = 0;
+	uint32_t lba = 0, left = 0;
+};
+static IdeCmd ide_cmd[2];
+static bool ide_trace = false;
+
+static void mgmt_wr(int ch, int a, uint16_t d)
+{
+	top->ide_mgmt_addr = (ch << 4) | a;
+	top->ide_mgmt_wdata = d;
+	top->ide_mgmt_wr = 1;
+	idle_sys(1);
+	top->ide_mgmt_wr = 0;
+	idle_sys(1);
+}
+static uint16_t mgmt_rd(int ch, int a)
+{
+	top->ide_mgmt_addr = (ch << 4) | a;
+	idle_sys(2);
+	uint16_t v = top->ide_mgmt_rdata;
+	top->ide_mgmt_rd = 1;
+	idle_sys(1);
+	top->ide_mgmt_rd = 0;
+	idle_sys(1);
+	return v;
+}
+
+static bool hdf_open(int n, const char *path)
+{
+	Hdf &h = hdf[n];
+	h.f = fopen(path, "r+b");
+	if (!h.f) { fprintf(stderr, "cannot open %s\n", path); return false; }
+	fseek(h.f, 0, SEEK_END);
+	h.sectors = (uint32_t)(ftell(h.f) / 512);
+	h.heads = 16; h.spt = 63;
+	uint32_t c = h.sectors / (16 * 63);
+	h.cyl = c > 16383 ? 16383 : c;
+	printf("[ide] drive %d: %s, %u sectors\n", n, path, h.sectors);
+	return true;
+}
+
+static void put_str(uint16_t *w, const char *s, int words)
+{
+	for (int i = 0; i < words; i++) {
+		char a = *s ? *s++ : ' ', b = *s ? *s++ : ' ';
+		w[i] = (uint16_t)((a << 8) | (uint8_t)b);
+	}
+}
+
+static void ide_present()
+{
+	for (int ch = 0; ch < 2; ch++) {
+		uint16_t v = 0;
+		if (hdf[ch * 2].f)     v |= 0x0009;
+		if (hdf[ch * 2 + 1].f) v |= 0x0090;
+		if (v) { mgmt_wr(ch, 6, v); mgmt_wr(ch, 5, 0x50A0); }
+	}
+}
+
+// one block (a sector) to the drive's buffer, and the status that announces it
+static void ide_load_sector(int ch, Hdf &h, uint32_t lba, bool last, uint8_t drv)
+{
+	uint8_t b[512];
+	memset(b, 0, sizeof b);
+	if (lba < h.sectors) { fseek(h.f, (long)lba * 512, SEEK_SET); fread(b, 1, 512, h.f); }
+	top->ide_mgmt_addr = (ch << 4) | 15;
+	for (int i = 0; i < 512; i += 2) {
+		top->ide_mgmt_wdata = (uint16_t)(b[i] | (b[i + 1] << 8));
+		top->ide_mgmt_wr = 1;
+		idle_sys(1);
+		top->ide_mgmt_wr = 0;
+		idle_sys(1);
+	}
+	mgmt_wr(ch, 0, 1);
+	mgmt_wr(ch, 5, (last ? 0x5E00 : 0x5C00) | drv);
+}
+
+static void ide_service()
+{
+	uint8_t req = top->ide_req;
+	for (int ch = 0; ch < 2; ch++) {
+		uint8_t r = (req >> (ch * 3)) & 7;
+		if (r == 0) continue;
+		IdeCmd &c = ide_cmd[ch];
+		if (r == 6) {
+			// a reset: ready
+			c.active = false;
+			mgmt_wr(ch, 5, 0x50A0);
+			continue;
+		}
+		if (r == 4) {
+			uint16_t r1 = mgmt_rd(ch, 1), r2 = mgmt_rd(ch, 2), r5 = mgmt_rd(ch, 5);
+			c.cmd = r5 >> 8; c.drv = r5 & 0xFF;
+			Hdf &h = hdf[ch * 2 + ((c.drv >> 4) & 1)];
+			uint32_t cnt = r1 & 0xFF;
+			c.lba = ((uint32_t)(c.drv & 0x0F) << 24) | ((uint32_t)r2 << 8) | (r1 >> 8);
+			c.left = cnt ? cnt : 256;
+			if (ide_trace) printf("[ide] %.4f ms ch %d drv %02X cmd %02X lba %u count %u\n", sim_ms(), ch, c.drv, c.cmd, c.lba, c.left);
+			if (!h.f) { mgmt_wr(ch, 0, 0x0400); mgmt_wr(ch, 5, 0x5500 | c.drv); continue; }
+			if (c.cmd == 0xEC) {
+				uint16_t w[256];
+				memset(w, 0, sizeof w);
+				w[0] = 0x0040; w[1] = h.cyl; w[3] = h.heads; w[6] = h.spt;
+				put_str(w + 10, "MISTER0001", 10); put_str(w + 23, "1.0", 4); put_str(w + 27, "MiSTer HDF", 20);
+				w[47] = 0x8010; w[49] = 0x0200; w[53] = 0x0001;
+				w[54] = h.cyl; w[55] = h.heads; w[56] = h.spt;
+				uint32_t chs = (uint32_t)h.cyl * h.heads * h.spt;
+				w[57] = chs & 0xFFFF; w[58] = chs >> 16;
+				w[60] = h.sectors & 0xFFFF; w[61] = h.sectors >> 16;
+				top->ide_mgmt_addr = (ch << 4) | 15;
+				for (int i = 0; i < 256; i++) {
+					top->ide_mgmt_wdata = w[i];
+					top->ide_mgmt_wr = 1; idle_sys(1); top->ide_mgmt_wr = 0; idle_sys(1);
+				}
+				mgmt_wr(ch, 0, 1);
+				mgmt_wr(ch, 5, 0x5E00 | c.drv);
+			}
+			else if (c.cmd == 0x20 || c.cmd == 0x21) {
+				c.active = true;
+				c.left--;
+				ide_load_sector(ch, h, c.lba++, c.left == 0, c.drv);
+			}
+			else if (c.cmd == 0x30 || c.cmd == 0x31) {
+				c.active = true;
+				mgmt_wr(ch, 0, 1);
+				mgmt_wr(ch, 5, 0x5800 | c.drv);           // DRQ: the first block
+			}
+			else mgmt_wr(ch, 5, 0x5400 | c.drv);         // done (INITIALIZE, SET MULTIPLE, FLUSH, ...)
+			continue;
+		}
+		if (r == 5 && c.active) {
+			Hdf &h = hdf[ch * 2 + ((c.drv >> 4) & 1)];
+			if (c.cmd == 0x20 || c.cmd == 0x21) {
+				if (c.left == 0) { c.active = false; mgmt_wr(ch, 5, 0x5000 | c.drv); continue; }
+				c.left--;
+				ide_load_sector(ch, h, c.lba++, c.left == 0, c.drv);
+			}
+			else {
+				// a written block: the data back from the buffer
+				uint8_t b[512];
+				mgmt_rd(ch, 5);                           // (the cursor back to the buffer's start)
+				for (int i = 0; i < 512; i += 2) {
+					uint16_t v = mgmt_rd(ch, 15);
+					b[i] = v & 0xFF; b[i + 1] = v >> 8;
+				}
+				if (c.lba < h.sectors) { fseek(h.f, (long)c.lba * 512, SEEK_SET); fwrite(b, 1, 512, h.f); fflush(h.f); }
+				c.lba++;
+				if (--c.left == 0) { c.active = false; mgmt_wr(ch, 5, 0x5400 | c.drv); }
+				else { mgmt_wr(ch, 0, 1); mgmt_wr(ch, 5, 0x5C00 | c.drv); }
+			}
+		}
+	}
 }
 
 //----------------------------------------------------------------------------
@@ -411,6 +586,10 @@ int main(int argc, char **argv)
 		else if (a == "--mainreset") mainreset = atoi(next());
 		else if (a == "--bfg") bfg = true;
 		else if (a == "--mouse") mouse_file = next();
+		else if (a == "--hdf")  { if (!hdf_open(0, next())) return 2; }
+		else if (a == "--hdf1") { if (!hdf_open(1, next())) return 2; }
+		else if (a == "--hdf2") { if (!hdf_open(2, next())) return 2; }
+		else if (a == "--idetrace") ide_trace = true;
 #if VM_TRACE
 		else if (a == "--vcd") {
 			Verilated::traceEverOn(true);
@@ -432,6 +611,7 @@ int main(int argc, char **argv)
 	for (int i = 0; i < 3; i++) top->rtc[i] = 0;
 	top->kbd_mouse_data = 0; top->kbd_mouse_type = 0; top->kbd_mouse_level = 0;
 	top->mouse_buttons = 0;
+	top->ide_mgmt_addr = 0; top->ide_mgmt_rd = 0; top->ide_mgmt_wr = 0; top->ide_mgmt_wdata = 0;
 	top->cart_ar = arrom != nullptr;
 	top->card_bfg = bfg;
 	idle_sys(64);
@@ -467,6 +647,7 @@ int main(int argc, char **argv)
 	uio_cmd({0xF1, 0x03});                                      // release halt, keep reset
 	idle_sys(1000);
 	uio_cmd({0xF1, 0x00});                                      // run
+	ide_present();
 
 	// the mouse as Main sends it (UIO_MOUSE): a movement is X counts (type 0)
 	// and Y counts (type 1), each a signed byte with the level toggled; the
@@ -543,6 +724,7 @@ int main(int argc, char **argv)
 		}
 		uint64_t ph = (halfstep - 1) % 8;
 		if (ph == 0) { video.sample(); uart.sample(); }
+		if (ph == 0 && top->ide_req) ide_service();
 		if (ph % 4 == 0) {
 			// a clk_57 rising edge; the CPU's registers moved at it if cpu_ce
 			// was set before it (the CPU's outputs then hold a new cycle)

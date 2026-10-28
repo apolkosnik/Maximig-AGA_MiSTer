@@ -284,6 +284,13 @@ ap68040 #(.DEBUG(CPU_DEBUG)) cpu
 );
 
 wire        lb_req, lb_ack, lb_we, lb_line, lb_berr, lb_ci, lb_local;
+// a4k_lbus's beat port: the card's beats, or (AA3000+) the bus masters' through a3kp_lbarb
+wire        bus_req, bus_ack, bus_we, bus_line, bus_local;
+wire [31:2] bus_addr;
+wire  [3:0] bus_be;
+wire [31:0] bus_wdata;
+wire  [1:0] bus_beat, bus_tt;
+wire  [2:0] bus_tm;
 wire[127:0] lb_rline;
 wire [31:2] lb_addr;
 wire  [3:0] lb_be;
@@ -434,12 +441,12 @@ assign lb_tt    = bfg ? b_lb_tt    : a_lb_tt;
 assign lb_tm    = bfg ? b_lb_tm    : a_lb_tm;
 
 // a beat terminating on the local bus, for the simulation's bus trace
-reg lb_ack_d;
-always @(posedge clk_57) lb_ack_d <= lb_ack;
-assign dbg_lb_beat = lb_ack ^ lb_ack_d;
-assign dbg_lb_addr = {lb_addr, 2'b00};
-assign dbg_lb_we   = lb_we;
-assign dbg_lb_data = lb_we ? lb_wdata : lb_rdata;
+reg bus_ack_d;
+always @(posedge clk_57) bus_ack_d <= bus_ack;
+assign dbg_lb_beat = bus_ack ^ bus_ack_d;
+assign dbg_lb_addr = {bus_addr, 2'b00};
+assign dbg_lb_we   = bus_we;
+assign dbg_lb_data = bus_we ? bus_wdata : lb_rdata;
 
 //////////////////////////////  the motherboard  //////////////////////////
 
@@ -629,17 +636,17 @@ a4k_lbus #(.A3000P(A3000P)) lbus
 	.rtr_ra(rtr_ra),
 	.rtr_rd(rtr_rd),
 
-	.lb_req(lb_req),
-	.lb_ack(lb_ack),
-	.lb_addr(lb_addr),
-	.lb_be(lb_be),
-	.lb_we(lb_we),
-	.lb_wdata(lb_wdata),
-	.lb_line(lb_line),
-	.lb_beat(lb_beat),
-	.lb_tt(lb_tt),
-	.lb_tm(lb_tm),
-	.lb_local(lb_local),
+	.lb_req(bus_req),
+	.lb_ack(bus_ack),
+	.lb_addr(bus_addr),
+	.lb_be(bus_be),
+	.lb_we(bus_we),
+	.lb_wdata(bus_wdata),
+	.lb_line(bus_line),
+	.lb_beat(bus_beat),
+	.lb_tt(bus_tt),
+	.lb_tm(bus_tm),
+	.lb_local(bus_local),
 	.lb_rdata(lb_rdata),
 	.lb_rline(lb_rline),
 	.lb_berr(lb_berr),
@@ -700,13 +707,26 @@ a4k_lbus #(.A3000P(A3000P)) lbus
 	.dbg_ramsey()
 );
 
-// the AA3000+'s DMAC+ and the DSP3210's control latch (U124)
+// the AA3000+'s DMAC+ and the DSP3210's control latch (U124), the WD33C93A
+// and the SCSI disks (ide0, Main's drives 0 and 1, as SCSI IDs 0 and 1), the
+// bus masters' arbiter
+wire [15:0] ide0_mgmt_rd, ide1_mgmt_rd;
+wire [31:0] ide0_io_rdata, ide1_io_rdata;
+wire        ide0_irq, ide1_irq, ide0_nodata, ide1_nodata, ide0_drq, ide1_drq;
+wire  [1:0] ide0_present, ide1_present;
+wire  [3:0] scsi_io_addr;
+wire        scsi_io_rd, scsi_io_wr;
+wire [15:0] scsi_io_wdata;
 generate if (A3000P) begin : g_dmac
-	wire       sbic_req, sbic_a0, sbic_we;
-	wire [7:0] sbic_wdata;
-	reg        sbic_ack = 1'b0;
-	// (the WD33C93 comes with the SCSI phase: until then its registers read 0)
-	always @(posedge clk_57) sbic_ack <= sbic_req;
+	wire       sbic_req, sbic_ack, sbic_a0, sbic_we, sbic_intrq, sbic_drq, sbic_mr;
+	wire [7:0] sbic_wdata, sbic_rdata;
+	wire       sd_rq, sd_ak;
+	wire [7:0] sd_wd, sd_rd;
+	wire       m_req, m_ack, m_we;
+	wire[31:2] m_addr;
+	wire [3:0] m_be;
+	wire[31:0] m_wdata;
+	wire       prest;
 
 	a3kp_dmac dmac
 	(
@@ -724,9 +744,21 @@ generate if (A3000P) begin : g_dmac
 		.sbic_a0(sbic_a0),
 		.sbic_we(sbic_we),
 		.sbic_wdata(sbic_wdata),
-		.sbic_rdata(8'h00),
-		.sbic_intrq(1'b0),
-		.sbic_reset(),
+		.sbic_rdata(sbic_rdata),
+		.sbic_intrq(sbic_intrq),
+		.sbic_reset(prest),
+		.sbic_drq(sbic_drq),
+		.sd_req(sd_rq),
+		.sd_ack(sd_ak),
+		.sd_wdata(sd_wd),
+		.sd_rdata(sd_rd),
+		.m_req(m_req),
+		.m_ack(m_ack),
+		.m_addr(m_addr),
+		.m_be(m_be),
+		.m_we(m_we),
+		.m_wdata(m_wdata),
+		.m_rdata(lb_rdata),
 		.dsp_reset(),
 		.dsp_int0(),
 		.dsp_int1(),
@@ -737,11 +769,130 @@ generate if (A3000P) begin : g_dmac
 		.int2(dmac_int2),
 		.int6(dmac_int6)
 	);
+
+	// the SBIC's MR-: the system reset or the DMAC's PREST (on clk_sys)
+	reg [1:0] prest_s = 2'b00;
+	always @(posedge clk_sys) prest_s <= {prest_s[0], prest};
+	assign sbic_mr = ~sys_rst_n | prest_s[1];
+
+	wire       t_sel, t_atn, t_bsy, t_req, t_ack, t_abort;
+	wire [2:0] t_id, t_phase;
+	wire [7:0] t_tdata, t_idata;
+
+	a3kp_sbic sbic
+	(
+		.clk(clk_sys),
+		.mr(sbic_mr),
+		.h_req(sbic_req),
+		.h_ack(sbic_ack),
+		.h_a0(sbic_a0),
+		.h_we(sbic_we),
+		.h_wdata(sbic_wdata),
+		.h_rdata(sbic_rdata),
+		.intrq(sbic_intrq),
+		.drq(sbic_drq),
+		.d_req(sd_rq),
+		.d_ack(sd_ak),
+		.d_wdata(sd_wd),
+		.d_rdata(sd_rd),
+		.d_more(),
+		.sel(t_sel),
+		.sel_id(t_id),
+		.atn(t_atn),
+		.bsy(t_bsy),
+		.phase(t_phase),
+		.req(t_req),
+		.tdata(t_tdata),
+		.ack(t_ack),
+		.idata(t_idata),
+		.abort_t(t_abort)
+	);
+
+	// the initiator leaving the bus (Disconnect, Reset) frees the targets
+	reg t_abort_d = 1'b0;
+	always @(posedge clk_sys) t_abort_d <= t_abort;
+
+	a3kp_scsi_disk disks
+	(
+		.clk(clk_sys),
+		.reset(~sys_rst_n | (t_abort != t_abort_d)),
+		.sel(t_sel),
+		.sel_id(t_id),
+		.atn(t_atn),
+		.bsy(t_bsy),
+		.phase(t_phase),
+		.req(t_req),
+		.tdata(t_tdata),
+		.ack(t_ack),
+		.idata(t_idata),
+		.io_address(scsi_io_addr),
+		.io_read(scsi_io_rd),
+		.io_write(scsi_io_wr),
+		.io_writedata(scsi_io_wdata),
+		.io_readdata(ide0_io_rdata[15:0]),
+		.io_nodata(ide0_nodata),
+		.present(ide0_present)
+	);
+
+	a3kp_lbarb arb
+	(
+		.clk(clk_57),
+		.reset(sys_reset_57),
+		.bfg(bfg),
+		.c_req(lb_req),
+		.c_ack(lb_ack),
+		.c_addr(lb_addr),
+		.c_be(lb_be),
+		.c_we(lb_we),
+		.c_wdata(lb_wdata),
+		.c_line(lb_line),
+		.c_beat(lb_beat),
+		.c_tt(lb_tt),
+		.c_tm(lb_tm),
+		.c_local(lb_local),
+		.d0_req(1'b0),
+		.d0_ack(),
+		.d0_addr(30'd0),
+		.d0_be(4'd0),
+		.d0_we(1'b0),
+		.d0_wdata(32'd0),
+		.d0_hold(1'b0),
+		.d1_req(m_req),
+		.d1_ack(m_ack),
+		.d1_addr(m_addr),
+		.d1_be(m_be),
+		.d1_we(m_we),
+		.d1_wdata(m_wdata),
+		.lb_req(bus_req),
+		.lb_ack(bus_ack),
+		.lb_addr(bus_addr),
+		.lb_be(bus_be),
+		.lb_we(bus_we),
+		.lb_wdata(bus_wdata),
+		.lb_line(bus_line),
+		.lb_beat(bus_beat),
+		.lb_tt(bus_tt),
+		.lb_tm(bus_tm),
+		.lb_local(bus_local),
+		.dma_owns()
+	);
 end else begin : g_no_dmac
 	assign dm_ack = dm_req;
 	assign dm_rdata = 32'd0;
 	assign dmac_int2 = 1'b0;
 	assign dmac_int6 = 1'b0;
+	assign {scsi_io_addr, scsi_io_rd, scsi_io_wr, scsi_io_wdata} = 22'd0;
+	assign bus_req   = lb_req;
+	assign lb_ack    = bus_ack;
+	assign bus_addr  = lb_addr;
+	assign bus_be    = lb_be;
+	assign bus_we    = lb_we;
+	assign bus_wdata = lb_wdata;
+	assign bus_line  = lb_line;
+	assign bus_beat  = lb_beat;
+	assign bus_tt    = lb_tt;
+	assign bus_tm    = lb_tm;
+	assign bus_local = lb_local;
 end endgenerate
 
 // the chip bus side of the board
@@ -841,23 +992,24 @@ a4k_rtc rtc_chip
 );
 
 // the A4000 IDE port: one channel, master and slave, served by the HPS
-wire [15:0] ide0_mgmt_rd;
+// (ide0, Main's drives 0 and 1).  On the AA3000+ ide0 is the SCSI disks'
+// and the A4000 IDE port, an extra there, is ide1 (Main's drives 2 and 3).
 
 ide ide0
 (
 	.clk(clk_sys),
-	.rst_n(sys_rst_n & cpu_rsto_sys_n),
-	.irq(ide_irq),
-	.drq(ide_led),
+	.rst_n(sys_rst_n & (A3000P | cpu_rsto_sys_n)),
+	.irq(ide0_irq),
+	.drq(ide0_drq),
 	.use_fast(1'b1),
-	.no_data(ide_nodata),
-	.drive_en(ide_present),
+	.no_data(ide0_nodata),
+	.drive_en(ide0_present),
 
-	.io_address(ide_io_addr),
-	.io_read(ide_io_rd),
-	.io_readdata(ide_io_rdata),
-	.io_write(ide_io_wr),
-	.io_writedata({16'd0, ide_io_wdata}),
+	.io_address(A3000P ? scsi_io_addr : ide_io_addr),
+	.io_read(A3000P ? scsi_io_rd : ide_io_rd),
+	.io_readdata(ide0_io_rdata),
+	.io_write(A3000P ? scsi_io_wr : ide_io_wr),
+	.io_writedata({16'd0, A3000P ? scsi_io_wdata : ide_io_wdata}),
 	.io_32(1'b0),
 	.io_wait(),
 
@@ -870,8 +1022,48 @@ ide ide0
 	.mgmt_readdata(ide0_mgmt_rd)
 );
 
-assign ide_req[5:3]   = 3'b000;
-assign ide_mgmt_rdata = ide_mgmt_addr[4] ? 16'h0000 : ide0_mgmt_rd;
+generate if (A3000P) begin : g_ide1
+	ide ide1
+	(
+		.clk(clk_sys),
+		.rst_n(sys_rst_n & cpu_rsto_sys_n),
+		.irq(ide1_irq),
+		.drq(ide1_drq),
+		.use_fast(1'b1),
+		.no_data(ide1_nodata),
+		.drive_en(ide1_present),
+
+		.io_address(ide_io_addr),
+		.io_read(ide_io_rd),
+		.io_readdata(ide1_io_rdata),
+		.io_write(ide_io_wr),
+		.io_writedata({16'd0, ide_io_wdata}),
+		.io_32(1'b0),
+		.io_wait(),
+
+		.request(ide_req[5:3]),
+
+		.mgmt_address(ide_mgmt_addr[3:0]),
+		.mgmt_write(ide_mgmt_wr & ide_mgmt_addr[4]),
+		.mgmt_writedata(ide_mgmt_wdata),
+		.mgmt_read(ide_mgmt_rd & ide_mgmt_addr[4]),
+		.mgmt_readdata(ide1_mgmt_rd)
+	);
+end else begin : g_no_ide1
+	assign ide1_mgmt_rd  = 16'h0000;
+	assign ide1_io_rdata = 32'hFFFFFFFF;
+	assign {ide1_irq, ide1_nodata, ide1_drq} = 3'b000;
+	assign ide1_present  = 2'b00;
+	assign ide_req[5:3]  = 3'b000;
+end endgenerate
+
+// the port Budgie drives: ide0, or ide1 on the AA3000+
+assign ide_io_rdata   = A3000P ? ide1_io_rdata : ide0_io_rdata;
+assign ide_irq        = A3000P ? ide1_irq      : ide0_irq;
+assign ide_nodata     = A3000P ? ide1_nodata   : ide0_nodata;
+assign ide_present    = A3000P ? ide1_present  : ide0_present;
+assign ide_led        = ide0_drq | ide1_drq;
+assign ide_mgmt_rdata = ide_mgmt_addr[4] ? ide1_mgmt_rd : ide0_mgmt_rd;
 
 ////////////////////////////  A2065 ETHERNET  ///////////////////////////////
 

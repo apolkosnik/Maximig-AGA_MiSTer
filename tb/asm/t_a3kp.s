@@ -4,7 +4,8 @@
 ;   2-3   CONTR's bits read back
 ;   4     ACR rounds the address down to a word
 ;   5     ISTR with no DMA running: FE
-;   6-8   ST_DMA sets DMAENA (CONTR bit 8) and clears FE, SP_DMA clears it
+;   6-8   ST_DMA sets DMAENA (CONTR bit 8), FE stays (the FIFO is empty),
+;         SP_DMA clears DMAENA
 ;   9     the registers again $100 up (the DMAC+ decodes A6-A2)
 ;   10    the DSP status at $DD005C after the reset: $FFFF000F (in reset,
 ;         both host interrupts masked, none pending)
@@ -17,6 +18,9 @@
 ;   17    the RESET instruction resets the latch
 ;   18-19 chip RAM at $01000000, both ways
 ;   20-21 the ROM at $03F80000
+;   22-24 the WD33C93A's reset interrupt: the auxiliary status's INT, the
+;         SCSI Status $00, INT dropped by reading it
+;   25-26 PREST resets the WD33C93A: its reset interrupt again
 ;   98    an unexpected exception
 
 	include	"hw.i"
@@ -43,6 +47,20 @@ start:
 	move.w	#$7FFF,$9C(a6)
 	lea	DMAC,a5
 
+	; 22-24 the WD33C93A after its reset: INTRQ with status $00 (6.3.1);
+	; reading the status drops it; CLR_INT clears the DMAC's record of it
+	moveq	#0,d0
+	move.b	$41(a5),d0              ; auxiliary status
+	TCHECK	d0,$00000080,22
+	move.b	#$17,$41(a5)            ; the SCSI Status register
+	moveq	#0,d0
+	move.b	$43(a5),d0
+	TCHECK	d0,$00000000,23
+	moveq	#0,d0
+	move.b	$41(a5),d0
+	TCHECK	d0,$00000000,24
+	move.l	d0,$18(a5)              ; CLR_INT
+
 	; 1 WTC
 	move.l	$04(a5),d0
 	TCHECK	d0,$00000000,1
@@ -54,6 +72,15 @@ start:
 	move.l	#$00000006,$08(a5)
 	move.l	$08(a5),d0
 	TCHECK	d0,$00000006,3
+	; 25-26 PREST (CONTR bit 4) reset the WD33C93A: its interrupt again
+	moveq	#0,d0
+	move.b	$41(a5),d0
+	TCHECK	d0,$00000080,25
+	move.b	#$17,$41(a5)
+	moveq	#0,d0
+	move.b	$43(a5),d0
+	TCHECK	d0,$00000000,26
+	move.l	d0,$18(a5)              ; CLR_INT
 
 	; 4 ACR
 	move.l	#$00123457,$0C(a5)
@@ -69,7 +96,7 @@ start:
 	move.l	$08(a5),d0
 	TCHECK	d0,$00000106,6
 	move.l	$1C(a5),d0
-	TCHECK	d0,$00000000,7
+	TCHECK	d0,$00000001,7          ; (FE: less than a long word held)
 	move.l	d0,$3C(a5)
 	move.l	$08(a5),d0
 	TCHECK	d0,$00000006,8
