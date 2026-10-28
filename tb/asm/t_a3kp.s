@@ -22,6 +22,8 @@
 ;   22-24 the WD33C93A's reset interrupt: the auxiliary status's INT, the
 ;         SCSI Status $00, INT dropped by reading it
 ;   25-26 PREST resets the WD33C93A: its reset interrupt again
+;   27-28 no A4000 IDE port (an A3000): its status ($DD201C) and its
+;         interrupt status ($DD3020) are nobody's, all ones
 ;   98    an unexpected exception
 
 	include	"hw.i"
@@ -158,6 +160,12 @@ start:
 	TCHECK	d0,$00002000,20
 	move.l	$03F80004,d0
 	TCHECK	d0,start,21
+
+	; 27-28 no IDE: Gary's timeout (with the port, no drives: $7F7F, $0000)
+	move.l	$00DD201C,d0
+	TCHECK	d0,$FFFFFFFF,27
+	move.l	$00DD3020,d0
+	TCHECK	d0,$FFFFFFFF,28
 
 	TPASS	0
 

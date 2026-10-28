@@ -714,10 +714,10 @@ a4k_lbus #(.A3000P(A3000P)) lbus
 // the AA3000+'s DMAC+ and the DSP3210's control latch (U124), the WD33C93A
 // and the SCSI disks (ide0, Main's drives 0 and 1, as SCSI IDs 0 and 1), the
 // bus masters' arbiter
-wire [15:0] ide0_mgmt_rd, ide1_mgmt_rd;
-wire [31:0] ide0_io_rdata, ide1_io_rdata;
-wire        ide0_irq, ide1_irq, ide0_nodata, ide1_nodata, ide0_drq, ide1_drq;
-wire  [1:0] ide0_present, ide1_present;
+wire [15:0] ide0_mgmt_rd;
+wire [31:0] ide0_io_rdata;
+wire        ide0_irq, ide0_nodata, ide0_drq;
+wire  [1:0] ide0_present;
 wire  [3:0] scsi_io_addr;
 wire        scsi_io_rd, scsi_io_wr;
 wire [15:0] scsi_io_wdata;
@@ -1049,8 +1049,7 @@ a4k_rtc rtc_chip
 );
 
 // the A4000 IDE port: one channel, master and slave, served by the HPS
-// (ide0, Main's drives 0 and 1).  On the AA3000+ ide0 is the SCSI disks'
-// and the A4000 IDE port, an extra there, is ide1 (Main's drives 2 and 3).
+// (ide0, Main's drives 0 and 1).  On the AA3000+ ide0 is the SCSI disks'.
 
 ide ide0
 (
@@ -1079,48 +1078,15 @@ ide ide0
 	.mgmt_readdata(ide0_mgmt_rd)
 );
 
-generate if (A3000P) begin : g_ide1
-	ide ide1
-	(
-		.clk(clk_sys),
-		.rst_n(sys_rst_n & cpu_rsto_sys_n),
-		.irq(ide1_irq),
-		.drq(ide1_drq),
-		.use_fast(1'b1),
-		.no_data(ide1_nodata),
-		.drive_en(ide1_present),
-
-		.io_address(ide_io_addr),
-		.io_read(ide_io_rd),
-		.io_readdata(ide1_io_rdata),
-		.io_write(ide_io_wr),
-		.io_writedata({16'd0, ide_io_wdata}),
-		.io_32(1'b0),
-		.io_wait(),
-
-		.request(ide_req[5:3]),
-
-		.mgmt_address(ide_mgmt_addr[3:0]),
-		.mgmt_write(ide_mgmt_wr & ide_mgmt_addr[4]),
-		.mgmt_writedata(ide_mgmt_wdata),
-		.mgmt_read(ide_mgmt_rd & ide_mgmt_addr[4]),
-		.mgmt_readdata(ide1_mgmt_rd)
-	);
-end else begin : g_no_ide1
-	assign ide1_mgmt_rd  = 16'h0000;
-	assign ide1_io_rdata = 32'hFFFFFFFF;
-	assign {ide1_irq, ide1_nodata, ide1_drq} = 3'b000;
-	assign ide1_present  = 2'b00;
-	assign ide_req[5:3]  = 3'b000;
-end endgenerate
-
-// the port Budgie drives: ide0, or ide1 on the AA3000+
-assign ide_io_rdata   = A3000P ? ide1_io_rdata : ide0_io_rdata;
-assign ide_irq        = A3000P ? ide1_irq      : ide0_irq;
-assign ide_nodata     = A3000P ? ide1_nodata   : ide0_nodata;
-assign ide_present    = A3000P ? ide1_present  : ide0_present;
-assign ide_led        = ide0_drq | ide1_drq;
-assign ide_mgmt_rdata = ide_mgmt_addr[4] ? ide1_mgmt_rd : ide0_mgmt_rd;
+// the port Budgie drives: ide0; the AA3000+ has none (an A3000: $DD2000
+// is nothing there, a4k_lbus), so Budgie sees no drives and an idle line
+assign ide_io_rdata   = A3000P ? 32'hFFFFFFFF : ide0_io_rdata;
+assign ide_irq        = A3000P ? 1'b0         : ide0_irq;
+assign ide_nodata     = A3000P ? 1'b0         : ide0_nodata;
+assign ide_present    = A3000P ? 2'b00        : ide0_present;
+assign ide_led        = ide0_drq;
+assign ide_mgmt_rdata = ide_mgmt_addr[4] ? 16'h0000 : ide0_mgmt_rd;
+assign ide_req[5:3]   = 3'b000;
 
 ////////////////////////////  A2065 ETHERNET  ///////////////////////////////
 

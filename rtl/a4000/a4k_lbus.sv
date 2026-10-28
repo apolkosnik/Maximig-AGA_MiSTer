@@ -273,9 +273,9 @@ always @(*) begin
 			8'hC?:        dec = T_CREG;                                              // Fat Gary's mirror
 			8'hDC:        dec = T_RTC;
 			// (AA3000+: the DMAC+ at $DD0000-$DD1FFF; with A7 set only U124's
-			// latch answers, and only writes -- a read times out)
+			// latch answers, and only writes -- a read times out; no IDE)
 			8'hDD:        dec = (A3000P && a[15:13] == 3'b000) ? ((a[7] && !lb_we) ? T_NONE : T_DMAC) :
-			                    (a[15:13] == 3'b001) ? T_IDE : (a[15:13] == 3'b010) ? T_SHARE : T_NONE;
+			                    (!A3000P && a[15:13] == 3'b001) ? T_IDE : (a[15:13] == 3'b010) ? T_SHARE : T_NONE;
 			8'hDE:        dec = a[15] ? T_NONE : T_MBRES;
 			// the chip registers at $DFC000-$DFFFFF (4 KB, four times), Gary's
 			// interrupt enable at $DF8000-$DFBFFF; $DF0000-$DF7FFF is nothing
