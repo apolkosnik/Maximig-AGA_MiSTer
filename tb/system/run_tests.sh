@@ -10,6 +10,8 @@
 #             37.5 MHz
 #   t_reset   Main's reset (halt, the configuration, reset) with the CPU on
 #             the chip bus: the machine must boot again
+#   t_a3kp    the AA3000+ build: the DMAC+ registers, the DSP control latch
+#             (U124) and status, the chip RAM and ROM windows
 #   t_ar      the Action Replay cartridge (AR5's DeMoN v2 layout): its freezes
 #             (reset, CIA traps, the key), control register, register
 #             snapshot and stealth
@@ -66,6 +68,14 @@ for h in 2000 20000; do
 	out=$(timeout 1800 ./$OBJ/Vtb_top --rom ../asm/build/t_reset.rom --mainreset $h --ms 300 --quiet 2>&1) || true
 	if echo "$out" | grep -q '^\[mailbox\].*result 600D'; then echo "t_reset (halt $h) PASS"; else echo "$out" | grep -v '^\[sim\]'; echo "t_reset (halt $h) FAIL"; fail=1; fi
 done
+
+# the AA3000+ (a4k_machine with A3000P and the BFG9060 alone, as Maximig.sv
+# builds it on this branch): the DMAC+, the DSP control latch, the chip RAM
+# and ROM windows
+OBJ=${OBJ}_a3kp ./build.sh -GA3000P=1 -GCPU_CARD=1 > build_tests_a3kp.log 2>&1 || { tail -30 build_tests_a3kp.log; exit 1; }
+../asm/build.sh t_a3kp > /dev/null
+out=$(timeout 1800 ./${OBJ}_a3kp/Vtb_top --rom ../asm/build/t_a3kp.rom --ms 150 --quiet 2>&1) || true
+if echo "$out" | grep -q '^\[mailbox\].*result 600D'; then echo "t_a3kp PASS"; else echo "$out" | grep -v '^\[sim\]'; echo "t_a3kp FAIL"; fail=1; fi
 
 # the PC sampler's recorder (a debug build: the macro MAXIMIG_PCSAMPLE, the
 # ring armed after 256 retires): t_rtr freezes it at $100, the DDR3 dump is

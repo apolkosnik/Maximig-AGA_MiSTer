@@ -16,6 +16,8 @@
 //     --lbtrace         print every local-bus beat
 //     --lbtrace-from MS start the beat trace at MS milliseconds
 //     --pctrace N       print the PC every N clk_57 cycles
+//     --exctrace        print every exception the CPU takes: vector, the PC
+//                       and SR it stacks
 //     --iostat          bus beats per region every 100 ms
 //     --customtrace     print writes to DMACON, COP1LC/2LC, COPJMP, BPLCON0, INTENA,
 //                       INTREQ, COLOR00
@@ -372,7 +374,9 @@ int main(int argc, char **argv)
 	uint32_t ddd_addr = 0, ddd_len = 0;
 	const char *ddd_file = nullptr;
 	long pctrace = 0;
+	bool exctrace = false;
 	int mainreset = -1;
+	const char *mouse_file = nullptr;  // timed mouse events: "MS DX DY BUTTONS" a line
 	bool bfg = false;            // the BFG9060 card in place of the A3640          // mark 7: Main's reset, the machine running for this many clk_sys cycles halted
 	Video video;
 	for (int i = 1; i < argc; i++) {
@@ -391,6 +395,7 @@ int main(int argc, char **argv)
 		else if (a == "--lbtrace") lbtrace = true;
 		else if (a == "--lbtrace-from") { lbtrace = true; lbtrace_from = atof(next()); }
 		else if (a == "--pctrace") pctrace = atol(next());
+		else if (a == "--exctrace") exctrace = true;
 		else if (a == "--quiet") quiet = true;
 		else if (a == "--iostat") iostat = true;
 		else if (a == "--customtrace") customtrace = true;
@@ -405,6 +410,7 @@ int main(int argc, char **argv)
 		else if (a == "--freeze-ms") freeze_ms = atof(next());
 		else if (a == "--mainreset") mainreset = atoi(next());
 		else if (a == "--bfg") bfg = true;
+		else if (a == "--mouse") mouse_file = next();
 #if VM_TRACE
 		else if (a == "--vcd") {
 			Verilated::traceEverOn(true);
@@ -425,6 +431,7 @@ int main(int argc, char **argv)
 	top->io_uio = 0; top->io_fpga = 0; top->io_strobe = 0; top->io_din = 0;
 	for (int i = 0; i < 3; i++) top->rtc[i] = 0;
 	top->kbd_mouse_data = 0; top->kbd_mouse_type = 0; top->kbd_mouse_level = 0;
+	top->mouse_buttons = 0;
 	top->cart_ar = arrom != nullptr;
 	top->card_bfg = bfg;
 	idle_sys(64);
@@ -461,6 +468,22 @@ int main(int argc, char **argv)
 	idle_sys(1000);
 	uio_cmd({0xF1, 0x00});                                      // run
 
+	// the mouse as Main sends it (UIO_MOUSE): a movement is X counts (type 0)
+	// and Y counts (type 1), each a signed byte with the level toggled; the
+	// buttons as they are.  The script's moves go out a chunk at a time.
+	struct MouseEv { double ms; int dx, dy, btn; };
+	std::vector<MouseEv> mev;
+	if (mouse_file) {
+		FILE *mf = fopen(mouse_file, "r");
+		if (!mf) { perror(mouse_file); return 2; }
+		MouseEv e;
+		while (fscanf(mf, "%lf %d %d %d", &e.ms, &e.dx, &e.dy, &e.btn) == 4) mev.push_back(e);
+		fclose(mf);
+	}
+	size_t mev_i = 0;
+	std::vector<std::pair<int, int>> mq;      // (type, count) to send
+	uint64_t mq_next = 0;
+
 	uint64_t end_half = halfstep + (uint64_t)(run_ms / 1000.0 * 2.0 * CLK114_HZ);
 	uint64_t next_report = halfstep;
 	bool old_beat = 0;
@@ -491,6 +514,26 @@ int main(int argc, char **argv)
 
 	while (halfstep < end_half && result < 0) {
 		step_half();
+		if (mev_i < mev.size() && sim_ms() >= mev[mev_i].ms) {
+			const MouseEv &e = mev[mev_i++];
+			// (a packet is X then Y: userio takes a Y that follows a Y as the wheel)
+			for (int dx = e.dx, dy = e.dy; dx != 0 || dy != 0; ) {
+				int cx = dx > 100 ? 100 : dx < -100 ? -100 : dx;
+				int cy = dy > 100 ? 100 : dy < -100 ? -100 : dy;
+				mq.push_back({0, cx});
+				mq.push_back({1, cy});
+				dx -= cx; dy -= cy;
+			}
+			top->mouse_buttons = e.btn;
+			printf("[mouse] %.3f ms move %d,%d buttons %d\n", sim_ms(), e.dx, e.dy, e.btn); fflush(stdout);
+		}
+		if (!mq.empty() && halfstep >= mq_next && !key_step) {
+			top->kbd_mouse_type = mq.front().first;
+			top->kbd_mouse_data = (uint8_t)(int8_t)mq.front().second;
+			top->kbd_mouse_level ^= 1;
+			mq.erase(mq.begin());
+			mq_next = halfstep + 4000;
+		}
 		// a key as Main sends one: type 2 (keyboard), the code, the level toggled
 		if (key_at && key_step == 0 && halfstep >= key_at) {
 			top->kbd_mouse_type = 2; top->kbd_mouse_data = 0x5F; top->kbd_mouse_level ^= 1; key_step = 1;
@@ -546,6 +589,8 @@ int main(int argc, char **argv)
 					}
 				}
 			}
+			if (exctrace && top->dbg_xgo)
+				printf("%10.4f ms  [exc] vector %3u  PC %08X  SR %04X\n", sim_ms(), top->dbg_xvec, top->dbg_xpc, top->dbg_xsr);
 			if (pctrace && ++pc_cnt >= pctrace) { pc_cnt = 0; printf("%10.4f ms  PC %08X\n", sim_ms(), top->dbg_pc); }
 			if (top->dbg_halted && !halted_reported) {
 				printf("[cpu] halted (double bus fault) at %.4f ms, PC %08X\n", sim_ms(), top->dbg_pc);

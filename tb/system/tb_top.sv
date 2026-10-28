@@ -5,6 +5,12 @@
 // watches the video, the serial port and the local bus.
 
 module tb_top
+#(
+	// the machine as a4k_machine builds it (-G on the Verilator command line):
+	// both CPU cards and the A4000 by default, as the regression expects
+	parameter int CPU_CARD = 2,
+	parameter bit A3000P   = 1'b0
+)
 (
 	input             clk_114,
 	input             clk_57,
@@ -23,6 +29,7 @@ module tb_top
 	input       [7:0] kbd_mouse_data,
 	input       [1:0] kbd_mouse_type,
 	input             kbd_mouse_level,
+	input       [2:0] mouse_buttons,
 	input             cart_ar,       // the cartridge: the Action Replay, not HRTmon
 	input             card_bfg,      // the CPU card: the BFG9060, not the A3640
 
@@ -52,6 +59,10 @@ module tb_top
 	output     [31:0] dbg_lb_addr,
 	output            dbg_lb_we,
 	output     [31:0] dbg_lb_data,
+	output            dbg_xgo,          // exception processing starts
+	output      [7:0] dbg_xvec,         // ... its vector
+	output     [31:0] dbg_xpc,          // ... the PC it stacks
+	output     [15:0] dbg_xsr,          // ... the SR it stacks
 	output            pwr_led,
 	output            fdd_led
 );
@@ -66,7 +77,7 @@ wire  [7:0] dd_burstcnt, dd_be;
 wire [28:0] dd_addr;
 wire [63:0] dd_dout, dd_din;
 
-a4k_machine machine
+a4k_machine #(.CPU_CARD(CPU_CARD), .A3000P(A3000P)) machine
 (
 	.clk_114          (clk_114),
 	.clk_57           (clk_57),
@@ -100,7 +111,7 @@ a4k_machine machine
 	.joy3             (16'd0),
 	.joya0            (16'd0),
 	.joya1            (16'd0),
-	.mouse_buttons    (3'd0),
+	.mouse_buttons    (mouse_buttons),
 	.kbd_mouse_level  (kbd_mouse_level),
 	.kbd_mouse_type   (kbd_mouse_type),
 	.kbd_mouse_data   (kbd_mouse_data),
@@ -190,6 +201,10 @@ a4k_machine machine
 	.dbg_lb_we        (dbg_lb_we),
 	.dbg_lb_data      (dbg_lb_data)
 );
+assign dbg_xgo  = machine.dbg_xgo;
+assign dbg_xvec = machine.dbg_xvec;
+assign dbg_xpc  = machine.dbg_xpc;
+assign dbg_xsr  = machine.cpu.be.x_osr;
 
 sdram_model sdram
 (

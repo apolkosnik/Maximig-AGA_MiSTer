@@ -11,6 +11,14 @@
 //============================================================================
 
 module a4k_machine
+#(
+	// the CPU card, chosen at build time (only it is built): 0 the A3640,
+	// 1 the BFG9060, 2 both, the OSD's card_bfg choosing at a reset
+	parameter int CPU_CARD = 2,
+	// the machine: 0 the A4000, 1 the AA3000+ (docs/AA3000.md): the DMAC+
+	// with the DSP3210's control latch, its chip RAM and ROM windows
+	parameter bit A3000P   = 1'b0
+)
 (
 	// clocks: one PLL, edge aligned
 	input             clk_114,       // SDRAM, DDR3
@@ -227,11 +235,14 @@ wire  [2:0] c_tm;
 reg cpu_rsti_n = 1'b0;
 always @(posedge clk_57) if (cpu_ce) cpu_rsti_n <= sys_rst_n;
 
-// the card choice (an OSD status bit) only while the machine is in reset
+// the card choice (an OSD status bit) only while the machine is in reset;
+// a build with one card has it fixed
 reg [1:0] card_bfg_s = 2'b00;
 always @(posedge clk_57) begin
 	card_bfg_s <= {card_bfg_s[0], card_bfg};
-	if (!cpu_rsti_n) bfg <= card_bfg_s[1];
+	if (CPU_CARD == 0)      bfg <= 1'b0;
+	else if (CPU_CARD == 1) bfg <= 1'b1;
+	else if (!cpu_rsti_n)   bfg <= card_bfg_s[1];
 end
 
 // the RESET instruction for the clk_sys boards (IDE, A2065, Toccata), taken
@@ -297,6 +308,7 @@ wire [31:0] a_lb_wdata, b_lb_wdata;
 wire  [1:0] a_lb_beat, b_lb_beat, a_lb_tt, b_lb_tt;
 wire  [2:0] a_lb_tm, b_lb_tm;
 
+generate if (CPU_CARD != 1) begin : g_a3640
 a4k_a3640 a3640
 (
 	.clk(clk_57),
@@ -338,7 +350,18 @@ a4k_a3640 a3640
 
 	.dbg_state()
 );
+end else begin : g_no_a3640
+	assign a_di = 32'd0;
+	assign {a_ta_n, a_tea_n, a_tci_n, a_tbi_n, a_avec_n} = 5'b11111;
+	assign a_iack7_t = 1'b0;
+	assign {a_lb_req, a_lb_we, a_lb_line} = 3'b000;
+	assign a_lb_addr = 30'd0;
+	assign a_lb_be = 4'd0;
+	assign a_lb_wdata = 32'd0;
+	assign {a_lb_beat, a_lb_tt, a_lb_tm} = 7'd0;
+end endgenerate
 
+generate if (CPU_CARD != 0) begin : g_bfg9060
 a4k_bfg9060 bfg9060
 (
 	.clk(clk_57),
@@ -381,6 +404,17 @@ a4k_bfg9060 bfg9060
 
 	.dbg_state()
 );
+end else begin : g_no_bfg9060
+	assign b_di = 32'd0;
+	assign {b_ta_n, b_tea_n, b_tci_n, b_tbi_n, b_avec_n} = 5'b11111;
+	assign b_iack7_t = 1'b0;
+	assign {b_lb_req, b_lb_we, b_lb_line} = 3'b000;
+	assign b_lb_addr = 30'd0;
+	assign b_lb_be = 4'd0;
+	assign b_lb_wdata = 32'd0;
+	assign {b_lb_beat, b_lb_tt, b_lb_tm} = 7'd0;
+	assign lb_local = 1'b0;
+end endgenerate
 
 assign c_di     = bfg ? b_di     : a_di;
 assign c_ta_n   = bfg ? b_ta_n   : a_ta_n;
@@ -441,6 +475,13 @@ wire [31:0] sb_wdata, sb_rdata;
 
 wire        a2065_ena, toccata_ena;
 wire  [7:0] a2065_base, toccata_base;
+
+// the DMAC+ (AA3000+)
+wire        dm_req, dm_ack, dm_we;
+wire  [7:2] dm_addr;
+wire  [3:0] dm_be;
+wire [31:0] dm_wdata, dm_rdata;
+wire        dmac_int2, dmac_int6;
 
 wire        ovl;
 wire        extrom_on;           // the chipset: an extension ROM is loaded
@@ -553,7 +594,7 @@ assign rtr_rd = ev_sel ? (ev_w ? ev_qb : ev_qa) : rtr_ra[9] ? {16'd0, rtr_q2} : 
 assign rtr_rd = 32'd0;
 `endif
 
-a4k_lbus lbus
+a4k_lbus #(.A3000P(A3000P)) lbus
 (
 	.clk(clk_57),
 	.ce(cpu_ce),
@@ -629,6 +670,14 @@ a4k_lbus lbus
 	.sb_wdata(sb_wdata),
 	.sb_rdata(sb_rdata),
 
+	.dm_req(dm_req),
+	.dm_ack(dm_ack),
+	.dm_addr(dm_addr),
+	.dm_be(dm_be),
+	.dm_we(dm_we),
+	.dm_wdata(dm_wdata),
+	.dm_rdata(dm_rdata),
+
 	.a2065_ena(a2065_ena),
 	.a2065_base(a2065_base),
 	.toccata_ena(toccata_ena),
@@ -650,6 +699,50 @@ a4k_lbus lbus
 	.dbg_coldboot(),
 	.dbg_ramsey()
 );
+
+// the AA3000+'s DMAC+ and the DSP3210's control latch (U124)
+generate if (A3000P) begin : g_dmac
+	wire       sbic_req, sbic_a0, sbic_we;
+	wire [7:0] sbic_wdata;
+	reg        sbic_ack = 1'b0;
+	// (the WD33C93 comes with the SCSI phase: until then its registers read 0)
+	always @(posedge clk_57) sbic_ack <= sbic_req;
+
+	a3kp_dmac dmac
+	(
+		.clk(clk_57),
+		.reset(io_reset_57),
+		.req(dm_req),
+		.ack(dm_ack),
+		.addr(dm_addr),
+		.be(dm_be),
+		.we(dm_we),
+		.wdata(dm_wdata),
+		.rdata(dm_rdata),
+		.sbic_req(sbic_req),
+		.sbic_ack(sbic_ack),
+		.sbic_a0(sbic_a0),
+		.sbic_we(sbic_we),
+		.sbic_wdata(sbic_wdata),
+		.sbic_rdata(8'h00),
+		.sbic_intrq(1'b0),
+		.sbic_reset(),
+		.dsp_reset(),
+		.dsp_int0(),
+		.dsp_int1(),
+		.dsp_iack0(1'b0),
+		.dsp_iack1(1'b0),
+		.dsp_ci2(1'b0),
+		.dsp_ci6(1'b0),
+		.int2(dmac_int2),
+		.int6(dmac_int6)
+	);
+end else begin : g_no_dmac
+	assign dm_ack = dm_req;
+	assign dm_rdata = 32'd0;
+	assign dmac_int2 = 1'b0;
+	assign dmac_int6 = 1'b0;
+end endgenerate
 
 // the chip bus side of the board
 wire [23:1] chip_addr;
@@ -1081,8 +1174,8 @@ a4k_chipset chipset
 	.rdata_okk    (rdata_okk        ),
 	.aud_mix      (aud_mix          ),
 
-	.int2_ext     (ide_irq | a2065_int2),
-	.int6_ext     (toccata_int6     ),
+	.int2_ext     (ide_irq | a2065_int2 | dmac_int2),
+	.int6_ext     (toccata_int6 | dmac_int6),
 	.ovl          (ovl              ),
 	.extrom_on    (extrom_on        ),
 

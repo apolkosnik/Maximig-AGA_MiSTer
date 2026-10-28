@@ -301,7 +301,8 @@ wire  [6:0] IndirectUserOutFlop;
 wire        user_port_mode;
 assign USER_OUT = user_port_mode ? IndirectUserOutFlop : IndirectUserOutmt32;
 
-a4k_machine machine
+// this branch's machine: the AA3000+ (docs/AA3000.md) with the BFG9060
+a4k_machine #(.CPU_CARD(1), .A3000P(1'b1)) machine
 (
 	.clk_114          (clk_114),
 	.clk_57           (clk_57),

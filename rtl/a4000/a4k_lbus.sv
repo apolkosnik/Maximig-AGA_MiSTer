@@ -41,7 +41,8 @@
 module a4k_lbus
 #(
 	parameter int TOUT_DSACK = 511,           // 32 C1 periods, ~9 us, in clk cycles
-	parameter int TOUT_BERR  = 14_187_500     // ~250 ms in clk cycles
+	parameter int TOUT_BERR  = 14_187_500,    // ~250 ms in clk cycles
+	parameter bit A3000P     = 1'b0           // the AA3000+'s map (docs/AA3000.md): the DMAC+, the chip RAM and ROM windows
 )
 (
 	input             clk,
@@ -122,6 +123,15 @@ module a4k_lbus
 	output reg [31:0] sb_wdata,
 	input      [31:0] sb_rdata,
 
+	// the DMAC+ (a3kp_dmac, AA3000+): $DD0000-$DD1FFF
+	output reg        dm_req = 1'b0,
+	input             dm_ack,
+	output reg  [7:2] dm_addr,
+	output reg  [3:0] dm_be,
+	output reg        dm_we,
+	output reg [31:0] dm_wdata,
+	input      [31:0] dm_rdata,
+
 	// Zorro II board bases for the slow bus
 	output            a2065_ena,
 	output      [7:0] a2065_base,
@@ -177,7 +187,8 @@ localparam [4:0]
 	T_CART   = 5'd22,  // SDRAM: the HRTmon cartridge's RAM
 	T_GIEN   = 5'd23,  // Gary's interrupt enable ($DF8000-$DFBFFF)
 	T_AR     = 5'd24,  // SDRAM: the Action Replay's ROM and RAM
-	T_BFGRAM = 5'd25;  // DDR3: the BFG9060's 128 MB (the 128 MB Zorro III board's space)
+	T_BFGRAM = 5'd25,  // DDR3: the BFG9060's 128 MB (the 128 MB Zorro III board's space)
+	T_DMAC   = 5'd26;  // the DMAC+ and the DSP control latch (AA3000+)
 
 // slow bus target numbers (a4k_budgie)
 localparam [2:0] SB_CHIP = 3'd0, SB_CREG = 3'd1, SB_CIA = 3'd2, SB_RTC = 3'd3,
@@ -260,7 +271,10 @@ always @(*) begin
 			                    !cart_on ? T_FLOAT : (a[23:19] == 5'b10100) ? T_CART : T_CREG;
 			8'hC?:        dec = T_CREG;                                              // Fat Gary's mirror
 			8'hDC:        dec = T_RTC;
-			8'hDD:        dec = (a[15:13] == 3'b001) ? T_IDE : (a[15:13] == 3'b010) ? T_SHARE : T_NONE;
+			// (AA3000+: the DMAC+ at $DD0000-$DD1FFF; with A7 set only U124's
+			// latch answers, and only writes -- a read times out)
+			8'hDD:        dec = (A3000P && a[15:13] == 3'b000) ? ((a[7] && !lb_we) ? T_NONE : T_DMAC) :
+			                    (a[15:13] == 3'b001) ? T_IDE : (a[15:13] == 3'b010) ? T_SHARE : T_NONE;
 			8'hDE:        dec = a[15] ? T_NONE : T_MBRES;
 			// the chip registers at $DFC000-$DFFFFF (4 KB, four times), Gary's
 			// interrupt enable at $DF8000-$DFBFFF; $DF0000-$DF7FFF is nothing
@@ -275,6 +289,13 @@ always @(*) begin
 		if (toccata_ena && a[23:16] == toccata_base) dec = T_TOCC;
 	end
 	else if (a[31:24] == 8'h07) dec = bank_fitted(mbram, a[23:22]) ? T_MBRAM : T_MBNONE;
+	// AA3000+ (A3000+ spec 1.2): chip RAM again at $01000000 (the 2 MB of it;
+	// the rest of the 8 MB chip RAM window is unfitted), the ROM's 512 KB
+	// again at the top of the 4 MB ROM space, $03F80000, and the 1 MB ROM's
+	// other half at $03E00000
+	else if (A3000P && a[31:24] == 8'h01 && a[23:21] == 3'b000) dec = T_CHIP;
+	else if (A3000P && a[31:24] == 8'h03 && a[23:19] == 5'b11111) dec = T_ROM;
+	else if (A3000P && a[31:24] == 8'h03 && a[23:19] == 5'b11100) dec = extrom_on ? T_ROM : T_NONE;
 	else if (a[31:24] == 8'hFF) dec = T_ACZ3;
 	else begin
 		if (z3ram256_ena && a[31:28] == z3ram256_base) dec = T_Z3R256;
@@ -419,13 +440,14 @@ localparam [5:0] CYC_Z3RAM = 6'd10;   // Buster's Zorro III cycle on a memory bo
 localparam [5:0] CYC_RTG   = 6'd11;   // Zorro III cycle on the graphics board (ZZ9000-class)
 localparam [5:0] CYC_REG   = 6'd4;    // Gary/Ramsey registers
 localparam [5:0] CYC_AC    = 6'd14;   // a configuration-space Zorro II cycle
+localparam [5:0] CYC_DMAC  = 6'd6;    // a DMAC+ register (an estimate: Gary's chip select, the DMAC's own termination)
 
 //----------------------------------------------------------------------------
 // the beat
 //----------------------------------------------------------------------------
 localparam [3:0] S_IDLE = 4'd0, S_PORT = 4'd1, S_RTG = 4'd2, S_RTG2 = 4'd3, S_WAIT = 4'd4, S_TOUT = 4'd5, S_DONE = 4'd6,
                  S_SDQ = 4'd7, S_SDR = 4'd8, S_DDQ = 4'd9, S_DDR = 4'd10, S_PCN = 4'd11,
-                 S_PCE = 4'd12;
+                 S_PCE = 4'd12, S_DMAC = 4'd13;
 reg  [3:0] st;
 reg  [5:0] need;        // CPU clocks the beat must take
 reg  [5:0] elapsed;     // CPU clocks since the beat started
@@ -689,6 +711,7 @@ always @(posedge clk) begin
 		sd_req         <= sd_ack;
 		dd_req         <= dd_ack;
 		sb_req         <= sb_ack;
+		dm_req         <= dm_ack;
 		sdb_v          <= 1'b0;
 		ddb_v          <= 1'b0;
 		sd_pf          <= 1'b0;
@@ -848,6 +871,15 @@ always @(posedge clk) begin
 					rtg_wr  <= lb_we;
 					st      <= S_RTG;
 				end
+				T_DMAC: begin
+					dm_addr  <= lb_addr[7:2];
+					dm_be    <= lb_be;
+					dm_we    <= lb_we;
+					dm_wdata <= lb_wdata;
+					dm_req   <= ~dm_req;
+					need     <= fast ? 6'd0 : CYC_DMAC;
+					st       <= S_DMAC;
+				end
 				T_CPUSP: begin
 					berr <= 1'b1;
 					st   <= S_DONE;
@@ -876,6 +908,11 @@ always @(posedge clk) begin
 					st   <= S_TOUT;
 				end
 			endcase
+		end
+
+		S_DMAC: if (dm_ack == dm_req) begin
+			rdata <= dm_rdata;
+			st    <= S_WAIT;
 		end
 
 		S_PORT: if (sb_ack == sb_req) begin
