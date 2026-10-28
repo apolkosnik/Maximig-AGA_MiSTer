@@ -60,7 +60,8 @@ Work in progress.
    name Maximig, the `games/Amiga` directory, an A4000 System menu, IDE on
    by default, HRTmon configured for the A4000's IDE, `KICK4000.ROM` as the
    default Kickstart (0001), the cartridge choice, HRTmon or the Action
-   Replay (0002), and the CPU card, the A3640 or the BFG9060 (0003).
+   Replay (0002), the CPU card, the A3640 or the BFG9060 (0003), and the same
+   cartridge choice for Minimig (0004).
 3. **Kickstart:** put an **A4000** Kickstart in `games/Amiga/` as
    `KICK4000.ROM`, or pick one from the menu.
 
