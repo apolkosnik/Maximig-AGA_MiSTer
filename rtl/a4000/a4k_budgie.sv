@@ -21,7 +21,9 @@
 //    the long word at $DD2020, byte registers on D15-D8 (Linux pata_gayle:
 //    base + 2 + 4n); the control block at $DD3020+4n (alternate status /
 //    device control at $DD3038); the interrupt status at $DD3020, bit 7 the
-//    drive's INTRQ.  PIO cycles take IDE_CYC clocks in A4000 timing.
+//    drive's INTRQ.  PIO cycles take IDE_CYC clocks in A4000 timing.  Not
+//    built with IDE 0 (the AA3000+: an A3000 has none, a4k_lbus sends no
+//    IDE beats).
 //  * the Zorro II boards (A2065, Toccata) with Buster's Zorro II cycle,
 //    Z2_CYC clocks per 16-bit cycle in A4000 timing.
 //
@@ -31,6 +33,7 @@
 
 module a4k_budgie
 #(
+	parameter bit IDE       = 1'b1, // the A4000 IDE port
 	parameter int CHIP_SYNC = 0,    // colour clocks of resynchronisation after a chip-bus access
 	parameter int IDE_CYC   = 17,   // ~600 ns: PIO mode 0 cycle
 	parameter int Z2_CYC    = 16,   // ~560 ns: four 7 MHz clocks
@@ -227,7 +230,12 @@ always @(posedge clk) begin
 						st        <= S_RTC;
 					end
 					SB_IDE: begin
-						if (ide_istat) begin
+						if (!IDE) begin
+							// (no IDE port: never sent)
+							cnt <= 6'd1;
+							st  <= S_IDE2;
+						end
+						else if (ide_istat) begin
 							put_word({irq_seen | ide_irq, 7'h00, 8'h00});
 							cnt <= fast ? 6'd1 : 6'(IDE_CYC);
 							st  <= S_IDE2;
@@ -384,7 +392,7 @@ always @(posedge clk) begin
 
 		// INTRQ is held for the interrupt status register until it is read,
 		// or the IDE is reset with the machine (RST: a warm reset, RESET)
-		if (ide_reset) irq_seen <= 1'b0;
+		if (ide_reset || !IDE) irq_seen <= 1'b0;
 		else if (ide_irq) irq_seen <= 1'b1;
 
 		// the bridge latches AS at 7 MHz edges: once AS has been negated over

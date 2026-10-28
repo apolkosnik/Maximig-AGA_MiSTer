@@ -87,8 +87,7 @@ import a3kp_dsp_pkg::*;
 //----------------------------------------------------------------------------
 localparam [4:0] R_PC = 5'd15, R_MN = 5'd22, R_PN = 5'd23, R_SP = 5'd25, R_EVTP = 5'd26, R_PCSH = 5'd30;
 
-reg [31:0] rf [0:31];               // by code
-reg [31:0] pcsh = 32'd0;
+reg [31:0] pcsh = 32'd0;            // (the register file: a3kp_dsp_rf, below)
 
 //----------------------------------------------------------------------------
 // I/O registers (ior0 ps, ior8 emr, ior10 spc, ior12 pcw, ior14 dauc, ior15 ctr)
@@ -290,12 +289,17 @@ function automatic [31:0] pm_new(input [31:0] p, input [2:0] i, input [1:0] sz, 
 	endcase
 endfunction
 
-// a register by code (r0 reads 0, pcsh its own register)
-function automatic [31:0] rf_rd(input [4:0] c);
+// the register file's read ports: D's three (rq[0-2]), the DA pointer and
+// its r15-r19 increment (rq[3-4])
+wire  [4:0] rq_a [5];
+wire [31:0] rq [5];
+
+// a register by code from its read port's word (r0 reads 0, pcsh its own register)
+function automatic [31:0] rf_rd(input [4:0] c, input [31:0] q);
 	case (c)
 		5'd0:    rf_rd = 32'd0;
 		R_PCSH:  rf_rd = pcsh;
-		default: rf_rd = rf[c];
+		default: rf_rd = q;
 	endcase
 endfunction
 
@@ -309,8 +313,10 @@ wire        oz_mem = o_da && oz[6:3] != 4'd0;
 wire  [6:0] pf     = (st == 2'd0) ? ox : (st == 2'd1) ? oy : oz;
 wire        pf_mem = (st == 2'd0) ? ox_mem : (st == 2'd1) ? oy_mem : (st == 2'd2) ? oz_mem : 1'b0;
 wire  [1:0] pf_sz  = (st == 2'd0) ? 2'd2 : (st == 2'd1) ? y_size(o_ir) : z_size(o_ir);
-wire [31:0] pf_p   = rf_rd({1'b0, pf[6:3]});
-wire [31:0] pf_new = pm_new(pf_p, pf[2:0], pf_sz, rf_rd({2'b10, pf[2:0]}));
+assign      rq_a[3] = {1'b0, pf[6:3]};
+assign      rq_a[4] = {2'b10, pf[2:0]};
+wire [31:0] pf_p   = rf_rd(rq_a[3], rq[3]);
+wire [31:0] pf_new = pm_new(pf_p, pf[2:0], pf_sz, rf_rd(rq_a[4], rq[4]));
 reg   [1:0] y_lo;                   // Y's byte offset (state 1)
 reg  [31:0] z_addr;                 // Z's address (state 2)
 
@@ -319,16 +325,19 @@ reg  [31:0] z_addr;                 // Z's address (state 2)
 //----------------------------------------------------------------------------
 wire [31:0] dpc8 = d_pc + 32'd8;    // "pc" as an operand: the instruction's address + 8
 
-function automatic [31:0] dget(input [4:0] c);
+function automatic [31:0] dget(input [4:0] c, input [31:0] q);
 	if (c == R_PC) return dpc8;
-	return rf_rd(c);
+	return rf_rd(c, q);
 endfunction
 
 // D's three register reads: rS1 / rP (bits 15-11), rS2 / rI / rM (bits
 // 4-0; the loop's rM at 25-21), rB / rS / rD / rH (bits 20-16)
-wire [31:0] dp_a = dget(d_ir[15:11]);
-wire [31:0] dp_b = dget((d_ir[31:26] == 6'b000011) ? d_ir[25:21] : d_ir[4:0]);
-wire [31:0] dp_c = dget(d_ir[20:16]);
+assign      rq_a[0] = d_ir[15:11];
+assign      rq_a[1] = (d_ir[31:26] == 6'b000011) ? d_ir[25:21] : d_ir[4:0];
+assign      rq_a[2] = d_ir[20:16];
+wire [31:0] dp_a = dget(rq_a[0], rq[0]);
+wire [31:0] dp_b = dget(rq_a[1], rq[1]);
+wire [31:0] dp_c = dget(rq_a[2], rq[2]);
 
 function automatic logic illegal(input [5:0] op);
 	case (op)
@@ -914,6 +923,27 @@ end
 wire int_any = |int_req[15:8];
 
 //----------------------------------------------------------------------------
+// an error this cycle (7.5.2), taken at its end: the instruction executing is
+// aborted -- its results, the operand stage's pointer updates and load data
+//----------------------------------------------------------------------------
+logic       take_err, err_nmk, dbl;
+logic [3:0] err_ev;
+always @(*) begin
+	take_err = 1'b0; err_nmk = 1'b0; err_ev = 4'd0;
+	if (berr)                          begin take_err = 1'b1; err_nmk = 1'b1; err_ev = 4'd1; end
+	else if (dx.ill)                   begin take_err = 1'b1; err_nmk = 1'b1; err_ev = 4'd2; end
+	else if (aerr && emr[4])           begin take_err = 1'b1; err_ev = 4'd4; end
+	else if (a_s.v && a_ov && emr[5])  begin take_err = 1'b1; err_ev = 4'd5; end
+	else if (a_s.v && a_nan && emr[6]) begin take_err = 1'b1; err_ev = 4'd6; end
+	dbl = 1'b0;
+	if (take_err && level == 2'd2) begin
+		if (!err_nmk) take_err = 1'b0;              // a maskable error in the error level: ignored
+		else if (err_nm) dbl = 1'b1;                // a second non-maskable error: the double error
+	end
+end
+
+
+//----------------------------------------------------------------------------
 // the machine
 //----------------------------------------------------------------------------
 reg [31:0] fetch_q;                 // the fetched word (state 3's view of the state-2 access)
@@ -975,10 +1005,9 @@ task automatic mmio_wr(input [9:2] a, input [3:0] be, input [31:0] d);
 	endcase
 endtask
 
-// a CAU register written (r0, pc and the increment codes ignore it)
+// a CAU register written: pcsh here, the rest through a3kp_dsp_rf's ports
 task automatic reg_write(input [4:0] c, input [31:0] v);
 	if (c == R_PCSH) pcsh <= v;
-	else if (c != 5'd0 && c != R_PC && c != R_MN && c != R_PN) rf[c] <= v;
 endtask
 
 // an I/O register written (its size's bits)
@@ -994,15 +1023,13 @@ endtask
 
 // the end of a state: the DA pointer it used updated (X, Y, Z)
 task automatic state_end();
-	if (pf_mem) rf[{1'b0, pf[6:3]}] <= pf_new;
 	if (st == 2'd1) y_lo <= pf_p[1:0];
 	if (st == 2'd2) z_addr <= pf_p;
 endtask
 
 // the end of an instruction cycle: the pipeline advances (fw: the fetched word)
 task automatic cycle_end(input [31:0] fw);
-	logic        take_int, take_err, err_nmk, dbl;
-	logic [3:0]  ev;
+	logic        take_int;
 	logic [31:0] nfpc;
 	logic [2:0]  cls;
 	logic [31:0] nd_ir, nd_pc;
@@ -1068,22 +1095,10 @@ task automatic cycle_end(input [31:0] fw);
 	end
 
 	//------------------------------------------------------------------
-	// an error this cycle (7.5.2): the instruction executing is aborted --
-	// its results, the operand stage's pointer updates and load data
+	// an error this cycle (take_err, dbl: above)
 	//------------------------------------------------------------------
-	take_err = 1'b0; err_nmk = 1'b0; ev = 4'd0;
-	if (berr)                         begin take_err = 1'b1; err_nmk = 1'b1; ev = 4'd1; end
-	else if (dx.ill)                  begin take_err = 1'b1; err_nmk = 1'b1; ev = 4'd2; end
-	else if (aerr && emr[4])          begin take_err = 1'b1; ev = 4'd4; end
-	else if (a_s.v && a_ov && emr[5]) begin take_err = 1'b1; ev = 4'd5; end
-	else if (a_s.v && a_nan && emr[6]) begin take_err = 1'b1; ev = 4'd6; end
 	berr <= 1'b0;
 	aerr <= 1'b0;
-	dbl = 1'b0;
-	if (take_err && level == 2'd2) begin
-		if (!err_nmk) take_err = 1'b0;               // a maskable error in the error level: ignored
-		else if (err_nm) dbl = 1'b1;                 // a second non-maskable error: the double error
-	end
 
 	//------------------------------------------------------------------
 	// the register file, in the order of the states: X, Y, Z pointers,
@@ -1243,7 +1258,7 @@ task automatic cycle_end(input [31:0] fw);
 		w_v     <= 1'b0;
 		irsh_v  <= 1'b0;
 		inj     <= 2'd2;
-		inj_ir  <= {6'b000100, 5'd24, R_EVTP, 9'd0, ev, 3'd0};
+		inj_ir  <= {6'b000100, 5'd24, R_EVTP, 9'd0, err_ev, 3'd0};
 		inj_pc  <= fpc - 32'd8;                      // (r20: the prefetched instruction's address)
 		level   <= 2'd2;
 		err_nm  <= err_nmk;
@@ -1302,6 +1317,53 @@ always @(*) begin
 		2'd3: if (w_v) begin bs_go = 1'b1; bs_we = 1'b1; bs_ad = w_a; bs_sz = w_sz; bs_wd = w_d; end
 	endcase
 end
+
+//----------------------------------------------------------------------------
+// the register file's writes, in the order of the states: port A the state's
+// DA pointer update (X, Y, Z) and, at the cycle's end, a CA load; port B the
+// D stage's result (after the load).  r0, pc, -n, +n are not registers,
+// pcsh is its own (reg_write).
+//----------------------------------------------------------------------------
+// the state ends this clock: its on-chip access, or the bus answering (a
+// state that starts an external access ends when it answers)
+wire st_done  = !reset && ce && !halted && (pend ? m_ack == m_req : !(bs_go && mtype(bs_ad, cmode) == MT_EXT));
+wire cyc_done = st_done && st == 2'd3 && !take_err && !dbl;
+
+function automatic logic rf_wok(input [4:0] c);
+	rf_wok = c != 5'd0 && c != R_PC && c != R_MN && c != R_PN && c != R_PCSH;
+endfunction
+
+logic        wa_en, wb_en;
+logic  [4:0] wa_a, wb_a;
+logic [31:0] wa_d, wb_d;
+always @(*) begin
+	wa_en = 1'b0; wa_a = {1'b0, pf[6:3]}; wa_d = pf_new;
+	wb_en = 1'b0; wb_a = dx.pm_c; wb_d = dx.pm_v;
+	if (reset) begin
+		wa_en = 1'b1; wa_a = R_EVTP; wa_d = 32'd0;
+	end
+	else if (st_done && pf_mem) wa_en = 1'b1;
+	else if (cyc_done && o_k == O_LD && rf_wok(o_reg)) begin
+		wa_en = 1'b1; wa_a = o_reg; wa_d = ld_ext(o_w, xq, o_addr[1:0]);
+	end
+	// (one of the three: a call's link, a result, a pointer post-modified)
+	if (dx.lnk)     begin wb_a = dx.lnk_c; wb_d = d_pc + 32'd8; end
+	else if (dx.wr) begin wb_a = dx.wr_c;  wb_d = dx.wr_v; end
+	wb_en = cyc_done && (dx.lnk || dx.wr || dx.pm) && rf_wok(wb_a);
+end
+
+a3kp_dsp_rf #(.NR(5)) regs
+(
+	.clk(clk),
+	.wa_en(wa_en),
+	.wa_a(wa_a),
+	.wa_d(wa_d),
+	.wb_en(wb_en),
+	.wb_a(wb_a),
+	.wb_d(wb_d),
+	.ra(rq_a),
+	.rd(rq)
+);
 
 // the on-chip RAM: its own block (byte-enable M10K inference)
 wire [10:0] ram_a  = {bs_ad[12], bs_ad[11:2]};
@@ -1373,7 +1435,6 @@ always @(posedge clk) begin
 		ir0_p    <= 1'b0;
 		ir1_p    <= 1'b0;
 		tmr_p    <= 1'b0;
-		rf[R_EVTP] <= 32'd0;
 		dauc     <= 8'd0;
 		emr      <= 16'd0;
 		// pcw (Table 7-4): 0x038F; bits 10-13 latched from bio[7:4]

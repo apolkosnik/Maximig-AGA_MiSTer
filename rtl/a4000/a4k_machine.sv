@@ -3,7 +3,7 @@
 //
 //  The A3640 CPU card (ap68040 + a4k_a3640), the motherboard (a4k_lbus:
 //  Gary, Ramsey, Buster; a4k_budgie: the 16-bit buses; the RP5C01, the IDE
-//  port), the AGA chipset (a4k_chipset), the Zorro boards (Zorro III RAM
+//  port -- not on the AA3000+), the AGA chipset (a4k_chipset), the Zorro boards (Zorro III RAM
 //  and RTG in a4k_lbus, the A2065 and Toccata here), and the memory
 //  controllers (a4k_sdram, a4k_ddr3).  Everything of the MiSTer itself --
 //  hps_io, the PLL, video and audio output -- is outside, in Maximig.sv,
@@ -972,7 +972,7 @@ wire        z2_rw, z2_as_n, z2_uds_n, z2_lds_n;
 wire        a2065_sel, a2065_nrdy;
 wire        tocc_sel, tocc_rd, tocc_hwr, tocc_lwr;
 
-a4k_budgie budgie
+a4k_budgie #(.IDE(!A3000P)) budgie
 (
 	.clk(clk_sys),
 	.reset(reset),
@@ -1079,7 +1079,7 @@ ide ide0
 );
 
 // the port Budgie drives: ide0; the AA3000+ has none (an A3000: $DD2000
-// is nothing there, a4k_lbus), so Budgie sees no drives and an idle line
+// is nothing there, a4k_lbus; Budgie is built without it)
 assign ide_io_rdata   = A3000P ? 32'hFFFFFFFF : ide0_io_rdata;
 assign ide_irq        = A3000P ? 1'b0         : ide0_irq;
 assign ide_nodata     = A3000P ? 1'b0         : ide0_nodata;
