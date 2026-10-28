@@ -12,6 +12,10 @@
 //  (U123: dspCYC holds with dspBR, so a DSP running from host memory
 //  stalls the CPU, as on the real machine): dsp_hold.
 //
+//  The DSP's beats are marked (lb_dsp): U122 runs them as 32-bit 68030
+//  cycles that cannot be sized, so a4k_lbus answers one to an 8- or 16-bit
+//  port with a bus error.
+//
 //  A DMA master's beat is a data access, never a line, given TT 0 and TM 1
 //  (a4k_lbus takes TM 5 reads for the cartridge's NMI vector fetch, which
 //  only the CPU makes); in the BFG9060's RAM window it reaches the card's
@@ -66,6 +70,7 @@ module a3kp_lbarb
 	output reg  [1:0] lb_tt,
 	output reg  [2:0] lb_tm,
 	output reg        lb_local,
+	output reg        lb_dsp = 1'b0,  // the beat is the DSP's (an 8- or 16-bit port: a bus error)
 
 	output            dma_owns        // a DMA master has the bus (the card waits)
 );
@@ -129,6 +134,7 @@ always @(posedge clk) begin
 				lb_tt    <= 2'b00;
 				lb_tm    <= 3'd1;
 				lb_local <= bfg && bfg_ram(d0_addr);
+				lb_dsp   <= 1'b1;
 				lb_req   <= ~lb_req;
 				busy     <= 1'b1;
 			end
@@ -142,6 +148,7 @@ always @(posedge clk) begin
 				lb_tt    <= 2'b00;
 				lb_tm    <= 3'd1;
 				lb_local <= bfg && bfg_ram(d1_addr);
+				lb_dsp   <= 1'b0;
 				lb_req   <= ~lb_req;
 				busy     <= 1'b1;
 			end
@@ -155,6 +162,7 @@ always @(posedge clk) begin
 				lb_tt    <= c_tt;
 				lb_tm    <= c_tm;
 				lb_local <= c_local;
+				lb_dsp   <= 1'b0;
 				lb_req   <= ~lb_req;
 				busy     <= 1'b1;
 			end

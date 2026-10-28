@@ -19,6 +19,17 @@
 ;         ASC $20 (18 bytes: FLUSH writes the last word)
 ;   24    a target that is not there: the selection timeout ($42)
 ;   25    the SCSI interrupt as the CPU's level 2 (INTENA, PORTS)
+;   30-38 Level II, as Kickstart's scsi.device drives it (polled, DM 0):
+;         Select-With-ATN completes ($11), the target's Message Out REQ is
+;         its own service required interrupt ($8E); Transfer Info (SBT) of
+;         the Identify -> $1A, of the six CDB bytes -> $1B, of the status
+;         byte -> $1F, of the Command Complete message -> $20 (ACK held);
+;         Negate ACK: the disconnect ($85)
+;   26-29 the SBIC's words, as Kickstart's scsi.device uses them: a long
+;         write at $48 selects, a long read at $40 is the aux status and the
+;         data; a long write at $40 writes SASR alone; words $48 / $46; $44
+;         reads $FFFF
+;   96-97 a polled byte never offered (DBR)
 ;   98    an unexpected exception
 
 	include	"hw.i"
@@ -42,6 +53,7 @@ S_TCH	equ	$12
 S_DEST	equ	$15
 S_STAT	equ	$17
 S_CMD	equ	$18
+S_DATA	equ	$19
 
 	ROMHEADER start
 	org	$F80400
@@ -280,6 +292,80 @@ start:
 .got25:	move	#$2700,sr
 	TCHECK	d7,$00000016,25
 
+	; 26-29 the long and word accesses
+	move.l	#$00000000,$48(a5)      ; SASR: Own ID (the upper word)
+	move.l	$40(a5),d1              ; aux status : Own ID
+	and.l	#$FF00FFFF,d1
+	TCHECK	d1,$00000007,26
+	move.l	#S_OWNID,$40(a5)        ; SASR alone (no data write of 0)
+	moveq	#0,d1
+	move.b	$43(a5),d1
+	TCHECK	d1,$00000007,27
+	move.w	#S_OWNID,$48(a5)
+	moveq	#0,d1
+	move.w	$46(a5),d1
+	TCHECK	d1,$00000007,28
+	moveq	#0,d1
+	move.w	$44(a5),d1
+	TCHECK	d1,$0000FFFF,29
+
+	; 30-38 Level II, polled
+	moveq	#S_CTRL,d0
+	moveq	#0,d1                   ; DM 0: the host moves the bytes
+	bsr	sbic_wr
+	move.l	d0,$3C(a5)              ; SP_DMA
+	moveq	#S_DEST,d0
+	moveq	#0,d1
+	bsr	sbic_wr
+	moveq	#S_CMD,d0
+	moveq	#6,d1                   ; Select-With-ATN
+	bsr	sbic_wr
+	bsr	wait_int
+	TCHECK	d1,$00000011,30
+	bsr	wait_int
+	TCHECK	d1,$0000008E,31
+	moveq	#S_CMD,d0
+	move.b	#$A0,d1                 ; Transfer Info, single byte
+	bsr	sbic_wr
+	move.b	#$80,d1                 ; Identify, LUN 0
+	bsr	put_data
+	bsr	wait_int
+	TCHECK	d1,$0000001A,32
+	moveq	#6,d1
+	bsr	set_tc
+	moveq	#S_CMD,d0
+	moveq	#$20,d1                 ; Transfer Info, TC bytes
+	bsr	sbic_wr
+	moveq	#5,d2
+.cdb:	moveq	#0,d1                   ; TEST UNIT READY
+	bsr	put_data
+	dbra	d2,.cdb
+	bsr	wait_int
+	TCHECK	d1,$0000001B,33
+	moveq	#1,d1
+	bsr	set_tc
+	moveq	#S_CMD,d0
+	moveq	#$20,d1
+	bsr	sbic_wr
+	bsr	get_data
+	TCHECK	d1,$00000000,34         ; GOOD
+	bsr	wait_int
+	TCHECK	d1,$0000001F,35
+	moveq	#1,d1
+	bsr	set_tc
+	moveq	#S_CMD,d0
+	moveq	#$20,d1
+	bsr	sbic_wr
+	bsr	get_data
+	TCHECK	d1,$00000000,36         ; COMMAND COMPLETE
+	bsr	wait_int
+	TCHECK	d1,$00000020,37
+	moveq	#S_CMD,d0
+	moveq	#3,d1                   ; Negate ACK
+	bsr	sbic_wr
+	bsr	wait_int
+	TCHECK	d1,$00000085,38
+
 	TPASS	0
 
 ; the level-2 handler, as an interrupt server: the DMAC's if ISTR's INT_P
@@ -307,6 +393,48 @@ sbic_wr:
 ; d1 := the SBIC register d0 (byte, zero-extended)
 sbic_rd:
 	move.b	d0,$41(a5)
+	moveq	#0,d1
+	move.b	$43(a5),d1
+	rts
+
+; the transfer count := d1
+set_tc:
+	movem.l	d0-d2,-(sp)
+	move.l	d1,d2
+	moveq	#S_TCH,d0
+	swap	d1
+	bsr	sbic_wr
+	moveq	#S_TCH+1,d0
+	move.l	d2,d1
+	lsr.l	#8,d1
+	bsr	sbic_wr
+	moveq	#S_TCH+2,d0
+	move.l	d2,d1
+	bsr	sbic_wr
+	movem.l	(sp)+,d0-d2
+	rts
+
+; the Data register := d1 once DBR asks for it (polled transfers)
+put_data:
+	move.l	#100000,d6
+.p:	btst	#0,$41(a5)              ; DBR
+	bne.s	.go
+	subq.l	#1,d6
+	bne.s	.p
+	TFAIL	97
+.go:	move.b	#S_DATA,$41(a5)
+	move.b	d1,$43(a5)
+	rts
+
+; d1 := the Data register once DBR has a byte
+get_data:
+	move.l	#100000,d6
+.g:	btst	#0,$41(a5)
+	bne.s	.go
+	subq.l	#1,d6
+	bne.s	.g
+	TFAIL	96
+.go:	move.b	#S_DATA,$41(a5)
 	moveq	#0,d1
 	move.b	$43(a5),d1
 	rts

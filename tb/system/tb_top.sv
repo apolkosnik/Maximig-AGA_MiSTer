@@ -9,7 +9,8 @@ module tb_top
 	// the machine as a4k_machine builds it (-G on the Verilator command line):
 	// both CPU cards and the A4000 by default, as the regression expects
 	parameter int CPU_CARD = 2,
-	parameter bit A3000P   = 1'b0
+	parameter bit A3000P   = 1'b0,
+	parameter bit DSP3210  = 1'b1
 )
 (
 	input             clk_114,
@@ -85,7 +86,7 @@ wire  [7:0] dd_burstcnt, dd_be;
 wire [28:0] dd_addr;
 wire [63:0] dd_dout, dd_din;
 
-a4k_machine #(.CPU_CARD(CPU_CARD), .A3000P(A3000P)) machine
+a4k_machine #(.CPU_CARD(CPU_CARD), .A3000P(A3000P), .DSP3210(DSP3210)) machine
 (
 	.clk_114          (clk_114),
 	.clk_57           (clk_57),

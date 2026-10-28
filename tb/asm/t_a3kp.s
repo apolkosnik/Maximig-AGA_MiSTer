@@ -11,7 +11,8 @@
 ;         both host interrupts masked, none pending)
 ;   11-12 the latch at $DD0080: out of reset, both host interrupts enabled
 ;         ($B3); the byte at $DD005F
-;   13    DSP INT0 and INT1 asserted ($B0)
+;   13    DSP INT0 and INT1 asserted, the DSP held in reset ($30: running,
+;         its boot ROM would take INT1 and acknowledge it -- t_dsp)
 ;   14    a long word write: its last byte (the 8-bit port's last cycle)
 ;   15    everything asserted ($00)
 ;   16    a read at $DD0080 is nobody's: Gary's timeout, all ones
@@ -117,10 +118,10 @@ start:
 	move.b	$5F(a5),d0
 	TCHECK	d0,$000000BF,12
 
-	; 13 DSP INT0/INT1
-	move.b	#$B0,$80(a5)
+	; 13 DSP INT0/INT1 (in reset: nobody acknowledges them)
+	move.b	#$30,$80(a5)
 	move.l	$5C(a5),d0
-	TCHECK	d0,$FFFF00BC,13
+	TCHECK	d0,$FFFF003C,13
 
 	; 14 a long word: its last byte
 	move.l	#$000000F3,$80(a5)

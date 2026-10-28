@@ -16,6 +16,9 @@
 #             channel 0 as Main serves them): INQUIRY, READ CAPACITY, READ/
 #             WRITE, the unexpected phase and its resume, CHECK CONDITION and
 #             REQUEST SENSE, the selection timeout, the level-2 interrupt
+#   t_dsp     the AA3000+'s DSP3210 booted through its boot ROM as
+#             dsp3210.resource does (U124, INT1, location 0), running from
+#             chip RAM: CA/DA results, a bus error, INT0, BIO7 to INT2
 #   t_ar      the Action Replay cartridge (AR5's DeMoN v2 layout): its freezes
 #             (reset, CIA traps, the key), control register, register
 #             snapshot and stealth
@@ -28,6 +31,7 @@
 #   tb_rtc    the RP5C01: 12/24-hour writes and counts (tb/rtc/run.sh)
 #   tb_rtg    the RTG driver's SetGC/SetPanning on the AP68040 bench (tb/rtg/run.sh)
 #   tb_cia    the 8520s' PB6/PB7 timer outputs (tb/cia/run.sh)
+#   tb_dsp3210  the DSP3210 core and its assembler (tb/dsp3210/run.sh)
 #   tb_a2065  the A2065's CMD ring at a full host (tb/a2065/run.sh)
 #   tb_audio, tb_attach, tb_pot  Paula's audio DMA blocks, channel attachment,
 #             the analog pots (tb/paula/run.sh)
@@ -86,6 +90,9 @@ if echo "$out" | grep -q '^\[mailbox\].*result 600D'; then echo "t_a3kp PASS"; e
 PYTHONDONTWRITEBYTECODE=1 python3 mkhdf.py ${OBJ}_a3kp/t_scsi.hdf
 out=$(timeout 1800 ./${OBJ}_a3kp/Vtb_top --rom ../asm/build/t_scsi.rom --hdf ${OBJ}_a3kp/t_scsi.hdf --ms 200 --quiet 2>&1) || true
 if echo "$out" | grep -q '^\[mailbox\].*result 600D'; then echo "t_scsi PASS"; else echo "$out" | grep -v '^\[sim\]'; echo "t_scsi FAIL"; fail=1; fi
+../asm/build.sh t_dsp > /dev/null
+out=$(timeout 1800 ./${OBJ}_a3kp/Vtb_top --rom ../asm/build/t_dsp.rom --ms 150 --quiet 2>&1) || true
+if echo "$out" | grep -q '^\[mailbox\].*result 600D'; then echo "t_dsp PASS"; else echo "$out" | grep -v '^\[sim\]'; echo "t_dsp FAIL"; fail=1; fi
 
 # the PC sampler's recorder (a debug build: the macro MAXIMIG_PCSAMPLE, the
 # ring armed after 256 retires): t_rtr freezes it at $100, the DDR3 dump is
@@ -115,6 +122,7 @@ if ../rtc/run.sh; then :; else fail=1; fi
 if ../rtg/run.sh; then :; else fail=1; fi
 if ../cia/run.sh; then :; else fail=1; fi
 if ../a2065/run.sh; then :; else fail=1; fi
+if ../dsp3210/run.sh; then :; else fail=1; fi
 
 [ $fail -eq 0 ] && echo "ALL PASSED" || echo "FAILURES"
 exit $fail

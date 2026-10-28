@@ -18,9 +18,13 @@
 //    $18/$1A  CLR_INT strobe: clear the interrupts
 //    $1C/$1E  ISTR    7 INT_F, 6 INT_S, 5 E_INT, 4 INT_P, 1 FF, 0 FE
 //    $3C/$3E  SP_DMA  strobe: stop the DMA
-//    $40/$41  SASR    (long write / byte read: the A3000's mapping)
-//    $43/$47  SCMD    WD33C93 data register (byte)
-//    $49      SASR    WD33C93 address register (byte)
+//    $40-$4B  the WD33C93 on D7-D0 of each word (the A3000's mapping, as
+//             WinUAE's mbdmac): words $40, $48 SASR (the address register;
+//             reads: the aux status), $42, $46 SCMD (the selected register),
+//             $44, $4A nothing (read $FFFF).  A long word is its two words,
+//             the upper first (Kickstart's scsi.device selects with a long
+//             write to $48 and reads a long word at $40: aux status and
+//             data); but a long write at $40 writes SASR alone, its low byte.
 //    $5C      the DSP status (long word: the DMAC+'s DSP control register's
 //             read half; the byte is at $5F)
 //
@@ -171,8 +175,20 @@ always @(posedge clk) begin
 end
 wire sbic_int = intrq_s[1];
 
-localparam [1:0] S_IDLE = 2'd0, S_SBIC = 2'd1;
+localparam [1:0] S_IDLE = 2'd0, S_SBIC = 2'd1, S_SBIC2 = 2'd2;
 reg [1:0] st = S_IDLE;
+
+// the SBIC word at word offset w ($40-$4B): 0 nothing, 2 SASR, 3 SCMD
+function automatic [1:0] sbic_word(input [2:0] w);
+	case (w)
+		3'd0, 3'd4: sbic_word = 2'd2;      // $40, $48
+		3'd1, 3'd3: sbic_word = 2'd3;      // $42, $46
+		default:    sbic_word = 2'd0;      // $44, $4A
+	endcase
+endfunction
+reg       sb_lo;                       // the lower word's cycle follows
+reg       sb_lo_a0;
+reg [7:0] sb_lo_d;
 
 always @(posedge clk) begin
 	// the DSP's acknowledges drop its interrupts
@@ -210,16 +226,31 @@ always @(posedge clk) begin
 				ack <= req;
 			end
 			else if (addr[6:2] == 5'h10 || addr[6:2] == 5'h11 || addr[6:2] == 5'h12) begin
-				// $40-$4B: the WD33C93.  $40 long write / $41: SASR; $43, $47:
-				// SCMD; $49: SASR.  A long word write at $40 writes SASR with its
-				// low byte (A3000 software's long-word SASR access).
-				sbic_a0    <= (addr[6:2] == 5'h10) ? (be[0] && !be[2]) :      // $43 (lane 0) is SCMD, $41 (lane 2) SASR
-				              (addr[6:2] == 5'h11) ? 1'b1 : 1'b0;           // $47 SCMD, $49 SASR
+				// $40-$4B: the WD33C93, a cycle for each word with a register
+				logic [1:0] rh, rl;
+				logic       hi, lo;
+				rh = sbic_word({addr[3:2], 1'b0});
+				rl = sbic_word({addr[3:2], 1'b1});
+				hi = |be[3:2] && rh != 2'd0;
+				lo = |be[1:0] && rl != 2'd0;
+				if (we && be == 4'b1111 && addr[6:2] == 5'h10) begin
+					// a long write at $40: SASR, the long word's low byte
+					hi = 1'b1; lo = 1'b0;
+					rh = 2'd2;
+				end
+				rdata      <= 32'hFFFFFFFF;
 				sbic_we    <= we;
-				sbic_wdata <= (addr[6:2] == 5'h10) ? ((be[0] && !be[2]) ? wdata[7:0] : (be[3] ? wdata[7:0] : wdata[23:16])) :
-				              (addr[6:2] == 5'h11) ? wdata[7:0] : wdata[23:16];
-				sbic_req   <= ~sbic_req;
-				st         <= S_SBIC;
+				sb_lo      <= hi && lo;
+				sb_lo_a0   <= rl[0];
+				sb_lo_d    <= wdata[7:0];
+				if (hi || lo) begin
+					sbic_a0    <= hi ? rh[0] : rl[0];
+					sbic_wdata <= hi ? ((rh == 2'd2 && we && be == 4'b1111 && addr[6:2] == 5'h10) ? wdata[7:0] : wdata[23:16])
+					                 : wdata[7:0];
+					sbic_req   <= ~sbic_req;
+					st         <= hi ? S_SBIC : S_SBIC2;
+				end
+				else ack <= req;
 			end
 			else begin
 				if (we) case (addr[6:2])
@@ -247,10 +278,24 @@ always @(posedge clk) begin
 		end
 
 		S_SBIC: if (sbic_ack_s[1] == sbic_req) begin
-			// the SBIC's byte, on every lane
-			rdata <= {4{sbic_rdata}};
-			ack   <= req;
-			st    <= S_IDLE;
+			// the upper word's byte; then the lower word's cycle, if any
+			rdata[31:16] <= {8'h00, sbic_rdata};
+			if (sb_lo) begin
+				sbic_a0    <= sb_lo_a0;
+				sbic_wdata <= sb_lo_d;
+				sbic_req   <= ~sbic_req;
+				st         <= S_SBIC2;
+			end
+			else begin
+				ack <= req;
+				st  <= S_IDLE;
+			end
+		end
+
+		S_SBIC2: if (sbic_ack_s[1] == sbic_req) begin
+			rdata[15:0] <= {8'h00, sbic_rdata};
+			ack <= req;
+			st  <= S_IDLE;
 		end
 
 		default: st <= S_IDLE;

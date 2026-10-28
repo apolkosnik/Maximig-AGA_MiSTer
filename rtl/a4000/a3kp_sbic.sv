@@ -134,7 +134,7 @@ endfunction
 localparam [4:0]
 	E_IDLE  = 5'd0,  E_RESET = 5'd1,  E_SEL   = 5'd2,  E_SELW  = 5'd3,  E_NEXT = 5'd4,
 	E_BYTE  = 5'd5,  E_ACKW  = 5'd6,  E_INT   = 5'd7,  E_TI    = 5'd8,  E_TIB  = 5'd9,
-	E_FREEW = 5'd10, E_FOREVER = 5'd11, E_RESELT = 5'd12, E_INTW = 5'd13;
+	E_FREEW = 5'd10, E_FOREVER = 5'd11, E_RESELT = 5'd12, E_INTW = 5'd13, E_SBTW = 5'd14, E_SBTR = 5'd15;
 
 reg  [4:0] es = E_IDLE;
 reg [25:0] tmo;               // selection timeout, in clocks
@@ -362,13 +362,19 @@ always @(posedge clk) begin
 			es        <= E_INT;
 		end
 
-		// raise an interrupt: only once the last one has been read (a REQ up
-		// then has had its interrupt: it does not ask for service again)
+		// raise an interrupt: only once the last one has been read.  A status
+		// that reports the phase -- a transfer done with REQ in a new phase
+		// ($18-$1F), a transfer aborted ($28-$2F), an unexpected phase
+		// ($48-$4F), service required ($88-$8F) -- answers the REQ up then: it does not ask for service
+		// again.  Others (a Select completed, $11) leave it to ask (6.2.19:
+		// after a Select-With-ATN the target's Message Out REQ is its own
+		// service required interrupt).
 		E_INT: if (!int_r) begin
 			scsi_stat <= pend_stat;
 			int_r     <= 1'b1;
 			busy      <= 1'b0;
-			if (req) req_seen <= 1'b1;
+			if (req && pend_stat[3] && (pend_stat[7:4] == 4'h1 || pend_stat[7:4] == 4'h2 || pend_stat[7:4] == 4'h4 || pend_stat[7:4] == 4'h8))
+				req_seen <= 1'b1;
 			es        <= after_int;
 		end
 
@@ -568,6 +574,23 @@ always @(posedge clk) begin
 		// the last ACK of a Select-And-Transfer went with the interrupt
 		E_INTW: if (!req) es <= E_INT;
 
+		// a single-byte Transfer Info done: the target's next REQ, its phase
+		// in the status ($18-$1F); the bus going free, a disconnect
+		E_SBTW: if (!req) es <= E_SBTR;
+		E_SBTR: begin
+			if (!bsy) begin
+				connected <= 1'b0;
+				pend_stat <= 8'h85;
+				after_int <= E_IDLE;
+				es        <= E_INT;
+			end
+			else if (req) begin
+				pend_stat <= {4'h1, 1'b1, phase};
+				after_int <= E_IDLE;
+				es        <= E_INT;
+			end
+		end
+
 		// wait for the target to free the bus after the Command Complete
 		E_FREEW: if (!bsy) begin
 			connected <= 1'b0;
@@ -627,13 +650,7 @@ always @(posedge clk) begin
 					end
 					else begin
 						ack <= 1'b1;
-						if (sbt) begin
-							req_seen  <= 1'b0;
-							pend_stat <= {4'h1, 1'b1, phase};
-							after_int <= E_IDLE;
-							es        <= E_INTW;
-						end
-						else es <= E_ACKW;
+						es  <= sbt ? E_SBTW : E_ACKW;
 					end
 				end
 			end
@@ -647,13 +664,7 @@ always @(posedge clk) begin
 					if (phase == PH_MOUT && (sbt || tc == 24'd1)) atn <= 1'b0;   // ATN off before the last message byte
 					ack    <= 1'b1;
 					if (!sbt) {regs[R_TCH], regs[R_TCM], regs[R_TCL]} <= tc - 1'd1;
-					if (sbt) begin
-						req_seen  <= 1'b0;
-						pend_stat <= {4'h1, 1'b1, phase};
-						after_int <= E_IDLE;
-						es        <= E_INTW;
-					end
-					else es <= E_ACKW;
+					es     <= sbt ? E_SBTW : E_ACKW;
 				end
 			end
 		end

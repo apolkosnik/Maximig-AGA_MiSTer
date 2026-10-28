@@ -90,6 +90,7 @@ module a4k_lbus
 	input       [1:0] lb_tt,
 	input       [2:0] lb_tm,
 	input             lb_local,      // the BFG9060's own RAM ($08000000-$0FFFFFFF, its card decodes it)
+	input             lb_dsp,        // the AA3000+'s DSP3210: 32-bit cycles only (an 8- or 16-bit port: bus error)
 	output reg [31:0] lb_rdata,
 	output    [127:0] lb_rline,      // the DDR3 line of the last read (the BFG9060's bursts)
 	output reg        lb_berr,
@@ -181,7 +182,7 @@ localparam [4:0]
 	T_RTGFB  = 5'd16,  // DDR3: RTG framebuffer
 	T_RTGREG = 5'd17,  // RTG registers and CLUT
 	T_SHARE  = 5'd18,  // DDR3: HPS share window ($DD4000-$DD5FFF)
-	T_CPUSP  = 5'd19,  // CPU space (MOVES with FC 7): bus error
+	T_CPUSP  = 5'd19,  // CPU space (MOVES with FC 7), a DSP beat to a narrow port: bus error
 	T_FLOAT  = 5'd20,  // nothing answers where Gary does not time out: floats
 	T_NMIV   = 5'd21,  // the HRTmon cartridge's NMI vector
 	T_CART   = 5'd22,  // SDRAM: the HRTmon cartridge's RAM
@@ -307,6 +308,13 @@ always @(*) begin
 	// RAM too)
 	if (lb_local) dec = T_BFGRAM;
 	if (nmi_arm && !lb_we && lb_tt == 2'b00 && lb_tm == 3'd5) dec = T_NMIV;
+	// the DSP3210's cycles cannot be sized (U122): the 8- and 16-bit ports
+	// answer them with a bus error
+	if (A3000P && lb_dsp)
+		case (dec)
+			T_CREG, T_CIA, T_RTC, T_IDE, T_A2065, T_TOCC, T_ACZ2, T_GIEN, T_CART, T_AR, T_NMIV: dec = T_CPUSP;
+			default: ;
+		endcase
 end
 
 // cache inhibit (Gary's and the Zorro III boards' CIIN/CINH): everything

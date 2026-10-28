@@ -17,7 +17,10 @@ module a4k_machine
 	parameter int CPU_CARD = 2,
 	// the machine: 0 the A4000, 1 the AA3000+ (docs/AA3000.md): the DMAC+
 	// with the DSP3210's control latch, its chip RAM and ROM windows
-	parameter bit A3000P   = 1'b0
+	parameter bit A3000P   = 1'b0,
+	// the AA3000+'s DSP3210 (a3kp_dsp3210); without it the U124 latch and
+	// the status still answer, the DSP's lines idle (BIO6/BIO7 pulled up)
+	parameter bit DSP3210  = 1'b1
 )
 (
 	// clocks: one PLL, edge aligned
@@ -285,7 +288,7 @@ ap68040 #(.DEBUG(CPU_DEBUG)) cpu
 
 wire        lb_req, lb_ack, lb_we, lb_line, lb_berr, lb_ci, lb_local;
 // a4k_lbus's beat port: the card's beats, or (AA3000+) the bus masters' through a3kp_lbarb
-wire        bus_req, bus_ack, bus_we, bus_line, bus_local;
+wire        bus_req, bus_ack, bus_we, bus_line, bus_local, bus_dsp;
 wire [31:2] bus_addr;
 wire  [3:0] bus_be;
 wire [31:0] bus_wdata;
@@ -647,6 +650,7 @@ a4k_lbus #(.A3000P(A3000P)) lbus
 	.lb_tt(bus_tt),
 	.lb_tm(bus_tm),
 	.lb_local(bus_local),
+	.lb_dsp(bus_dsp),
 	.lb_rdata(lb_rdata),
 	.lb_rline(lb_rline),
 	.lb_berr(lb_berr),
@@ -727,6 +731,11 @@ generate if (A3000P) begin : g_dmac
 	wire [3:0] m_be;
 	wire[31:0] m_wdata;
 	wire       prest;
+	wire       dsp_rst, dsp_i0, dsp_i1, dsp_ack0, dsp_ack1, dsp_ci2, dsp_ci6;
+	wire       d_req, d_ack, d_we, d_hold;
+	wire[31:2] d_addr;
+	wire [3:0] d_be;
+	wire[31:0] d_wdata;
 
 	a3kp_dmac dmac
 	(
@@ -759,16 +768,62 @@ generate if (A3000P) begin : g_dmac
 		.m_we(m_we),
 		.m_wdata(m_wdata),
 		.m_rdata(lb_rdata),
-		.dsp_reset(),
-		.dsp_int0(),
-		.dsp_int1(),
-		.dsp_iack0(1'b0),
-		.dsp_iack1(1'b0),
-		.dsp_ci2(1'b0),
-		.dsp_ci6(1'b0),
+		.dsp_reset(dsp_rst),
+		.dsp_int0(dsp_i0),
+		.dsp_int1(dsp_i1),
+		.dsp_iack0(dsp_ack0),
+		.dsp_iack1(dsp_ack1),
+		.dsp_ci2(dsp_ci2),
+		.dsp_ci6(dsp_ci6),
 		.int2(dmac_int2),
 		.int6(dmac_int6)
 	);
+
+	// the DSP3210 (docs/AA3000.md): CKI 50 MHz (U701's), here 7 of every 8
+	// clk_57 cycles; held in reset by U124's dspRST; its INT0/INT1 from
+	// U124, its BIO6/BIO7 (pulled up as inputs) the CPU's INT6/INT2 through
+	// U124's masks (U701); BIO4/BIO5 low (pcw at reset: Computer mode, the
+	// boot ROM at 0)
+	wire [7:0] bio_o, bio_e;
+	wire [7:0] bio_pin = (bio_e & bio_o) | (~bio_e & 8'b1100_0000);
+	assign dsp_ci2 = !bio_pin[7];
+	assign dsp_ci6 = !bio_pin[6];
+
+	if (DSP3210) begin : g_dsp
+	reg  [2:0] cki_n = 3'd0;
+	always @(posedge clk_57) cki_n <= cki_n + 1'd1;
+
+	a3kp_dsp3210 dsp
+	(
+		.clk(clk_57),
+		.ce(cki_n != 3'd7),
+		.reset(dsp_rst | sys_reset_57),
+		.m_req(d_req),
+		.m_ack(d_ack),
+		.m_addr(d_addr),
+		.m_be(d_be),
+		.m_we(d_we),
+		.m_wdata(d_wdata),
+		.m_rdata(lb_rdata),
+		.m_berr(lb_berr),
+		.m_hold(d_hold),
+		.ir0_n(!dsp_i0),
+		.ir1_n(!dsp_i1),
+		.iack0(dsp_ack0),
+		.iack1(dsp_ack1),
+		.bio_in(bio_pin),
+		.bio_out(bio_o),
+		.bio_oe(bio_e),
+		.dbg_pc(),
+		.dbg_retire(),
+		.dbg_halted()
+	);
+	end
+	else begin : g_no_dsp
+	assign {d_req, d_we, d_hold, d_addr, d_be, d_wdata} = '0;
+	assign {dsp_ack0, dsp_ack1} = 2'b00;
+	assign {bio_o, bio_e} = 16'd0;
+	end
 
 	// the SBIC's MR-: the system reset or the DMAC's PREST (on clk_sys)
 	reg [1:0] prest_s = 2'b00;
@@ -850,13 +905,13 @@ generate if (A3000P) begin : g_dmac
 		.c_tt(lb_tt),
 		.c_tm(lb_tm),
 		.c_local(lb_local),
-		.d0_req(1'b0),
-		.d0_ack(),
-		.d0_addr(30'd0),
-		.d0_be(4'd0),
-		.d0_we(1'b0),
-		.d0_wdata(32'd0),
-		.d0_hold(1'b0),
+		.d0_req(d_req),
+		.d0_ack(d_ack),
+		.d0_addr(d_addr),
+		.d0_be(d_be),
+		.d0_we(d_we),
+		.d0_wdata(d_wdata),
+		.d0_hold(d_hold),
 		.d1_req(m_req),
 		.d1_ack(m_ack),
 		.d1_addr(m_addr),
@@ -874,6 +929,7 @@ generate if (A3000P) begin : g_dmac
 		.lb_tt(bus_tt),
 		.lb_tm(bus_tm),
 		.lb_local(bus_local),
+		.lb_dsp(bus_dsp),
 		.dma_owns()
 	);
 end else begin : g_no_dmac
@@ -893,6 +949,7 @@ end else begin : g_no_dmac
 	assign bus_tt    = lb_tt;
 	assign bus_tm    = lb_tm;
 	assign bus_local = lb_local;
+	assign bus_dsp   = 1'b0;
 end endgenerate
 
 // the chip bus side of the board

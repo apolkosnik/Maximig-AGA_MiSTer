@@ -43,3 +43,5 @@ tb/paula/*.log
 tb/agnus/obj/
 tb/agnus/*.log
 tb/rtg/obj/
+tb/dsp3210/obj/
+tb/**/__pycache__/
