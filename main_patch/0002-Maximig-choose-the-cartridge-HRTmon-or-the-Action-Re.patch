@@ -1,7 +1,7 @@
-From 49480fb2b29320c408741643ed98daa2eb45daf7 Mon Sep 17 00:00:00 2001
+From 9eea26f1e23f6b5fddb6fde9be8cb7324c0690eb Mon Sep 17 00:00:00 2001
 From: Adam Polkosnik <apolkosnik@gmail.com>
 Date: Sun, 25 Oct 2026 15:22:36 -0400
-Subject: [PATCH 2/2] Maximig: choose the cartridge, HRTmon or the Action
+Subject: [PATCH 2/5] Maximig: choose the cartridge, HRTmon or the Action
  Replay
 
 The Maximig System menu's HRTmon item becomes "Cartridge: Off / HRTmon /
@@ -19,11 +19,11 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  3 files changed, 52 insertions(+), 4 deletions(-)
 
 diff --git a/menu.cpp b/menu.cpp
-index 4a1f076..7e79f4e 100644
+index 8b28702..3cc5b14 100644
 --- a/menu.cpp
 +++ b/menu.cpp
-@@ -6690,7 +6690,7 @@ void HandleUI(void)
- 				fastcfg ? config_memory_fast_msg[(minimig_config.cpu>>1) & 1][fastcfg] : "",
+@@ -6768,7 +6768,7 @@ void HandleUI(void)
+ 				fastcfg ? config_memory_fast_msg[((minimig_config.cpu & 0x23) != 0x23 && (minimig_config.cpu & 2)) ? 1 : 0][fastcfg] : "",
  				((minimig_config.memory >> 2) & 0x03) ? "+" : "",
  				((minimig_config.memory >> 2) & 0x03) ? config_memory_slow_msg[(minimig_config.memory >> 2) & 0x03] : "",
 -				(minimig_config.memory & 0x40) ? " HRT" : ""
@@ -31,10 +31,10 @@ index 4a1f076..7e79f4e 100644
  			);
  
  			char *p = strrchr(minimig_config.kickstart, '/');
-@@ -6859,8 +6859,18 @@ void HandleUI(void)
+@@ -6934,8 +6934,18 @@ void HandleUI(void)
  			}
  		}
- 		OsdWrite(m++, s, menusub == 7, 0);
+ 		OsdWrite(m++, s, menusub == 6, 0);
 -		strcpy(s, " HRTmon   : ");
 -		strcat(s, (minimig_config.memory & 0x40) ? "Enabled" : "Disabled");
 +		if (is_maximig())
@@ -49,12 +49,12 @@ index 4a1f076..7e79f4e 100644
 +			strcpy(s, " HRTmon   : ");
 +			strcat(s, (minimig_config.memory & 0x40) ? "Enabled" : "Disabled");
 +		}
- 		OsdWrite(m++, s, menusub == 8, 0);
+ 		OsdWrite(m++, s, menusub == 7, 0);
  
  		OsdWrite(m++, "", 0, 0);
-@@ -7040,7 +7050,17 @@ void HandleUI(void)
+@@ -7114,7 +7124,17 @@ void HandleUI(void)
  			}
- 			else if (menusub == 8)
+ 			else if (menusub == 7)
  			{
 -				minimig_config.memory ^= 0x40;
 +				if (is_maximig())
@@ -70,12 +70,12 @@ index 4a1f076..7e79f4e 100644
 +				else minimig_config.memory ^= 0x40;
  				menustate = MENU_MINIMIG_CHIPSET1;
  			}
- 			else if (menusub == 10)
+ 			else if (menusub == 9)
 diff --git a/support/minimig/minimig_config.cpp b/support/minimig/minimig_config.cpp
-index d2ed55e..b47b935 100644
+index ce1a6bd..369eb02 100644
 --- a/support/minimig/minimig_config.cpp
 +++ b/support/minimig/minimig_config.cpp
-@@ -292,6 +292,26 @@ static char UploadKickstart(char *name)
+@@ -294,6 +294,26 @@ static char UploadKickstart(char *name)
  static char UploadActionReplay()
  {
  	fileTYPE file = {};
@@ -102,7 +102,7 @@ index d2ed55e..b47b935 100644
  	if(FileOpen(&file, user_io_make_filepath(HomeDir(), "HRTMON.ROM")) || FileOpen(&file, "HRTMON.ROM"))
  	{
  		int adr, data;
-@@ -470,6 +490,9 @@ static void ApplyConfiguration(char reloadkickstart)
+@@ -472,6 +492,9 @@ static void ApplyConfiguration(char reloadkickstart)
  	minimig_ConfigFloppy(minimig_config.floppy.drives, minimig_config.floppy.speed);
  	minimig_ConfigFloppyExt(minimig_config.externalfloppy.exDrives[0], minimig_config.externalfloppy.exDrives[1], minimig_config.externalfloppy.exDrives[2], minimig_config.externalfloppy.exDrives[3]);
  
@@ -113,7 +113,7 @@ index d2ed55e..b47b935 100644
  
  	if (reloadkickstart)
 diff --git a/support/minimig/minimig_config.h b/support/minimig/minimig_config.h
-index e5ad826..5a30de8 100644
+index 2583c81..6756415 100644
 --- a/support/minimig/minimig_config.h
 +++ b/support/minimig/minimig_config.h
 @@ -12,6 +12,11 @@

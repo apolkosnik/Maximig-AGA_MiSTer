@@ -79,8 +79,8 @@ slave (both instantiated in `a4k_machine`):
 
 The OSD's CPU item also offers Matthias Heinrichs' BFG9060
 (gitlab.com/MHeinrichs/a4000-tk) with a 68040, at 25 or 37.5 MHz (its two
-68040 firmwares; 50 MHz too).  The choice is the status bit 54 (Main's
-ext_cfg bit 22), taken while the machine is in reset; both cards are
+68040 firmwares; 50 MHz too).  The choice is the status bit 56 (Main's
+ext_cfg bit 24), taken while the machine is in reset; both cards are
 built, the other one held in reset.  From the card's CPLD sources
 (`mcp.vhd`, `control.vhd`, `ramcon.vhd`, `bus_sizing.vhd`, master with
 `FOR_68060 = 0`):

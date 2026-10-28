@@ -1,8 +1,8 @@
-From 0e3281147f2ad298ec18bfa23982de95a74d999f Mon Sep 17 00:00:00 2001
+From 744ce9afe50b7a7238d401e658b0f1ccf17c0289 Mon Sep 17 00:00:00 2001
 From: Adam Polkosnik <apolkosnik@gmail.com>
 Date: Tue, 27 Oct 2026 21:55:31 -0400
-Subject: [PATCH] Minimig: the cartridge, HRTmon or the Action Replay, as on
- Maximig
+Subject: [PATCH 4/5] Minimig: the cartridge, HRTmon or the Action Replay, as
+ on Maximig
 
 The System menu's HRTmon item becomes "Cartridge: Off / HRTmon / Action
 Replay" for Minimig too.  The Action Replay (AR5.ROM, the DeMoN v2 build)
@@ -19,11 +19,11 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  3 files changed, 29 insertions(+), 28 deletions(-)
 
 diff --git a/menu.cpp b/menu.cpp
-index c9509cd..6556807 100644
+index da9a371..63c2f78 100644
 --- a/menu.cpp
 +++ b/menu.cpp
-@@ -6690,7 +6690,7 @@ void HandleUI(void)
- 				fastcfg ? config_memory_fast_msg[(minimig_config.cpu>>1) & 1][fastcfg] : "",
+@@ -6768,7 +6768,7 @@ void HandleUI(void)
+ 				fastcfg ? config_memory_fast_msg[((minimig_config.cpu & 0x23) != 0x23 && (minimig_config.cpu & 2)) ? 1 : 0][fastcfg] : "",
  				((minimig_config.memory >> 2) & 0x03) ? "+" : "",
  				((minimig_config.memory >> 2) & 0x03) ? config_memory_slow_msg[(minimig_config.memory >> 2) & 0x03] : "",
 -				(minimig_config.memory & 0x40) ? ((is_maximig() && (minimig_get_extcfg() & MAXIMIG_EXTCFG_AR)) ? " AR" : " HRT") : ""
@@ -31,10 +31,10 @@ index c9509cd..6556807 100644
  			);
  
  			char *p = strrchr(minimig_config.kickstart, '/');
-@@ -6864,18 +6864,10 @@ void HandleUI(void)
+@@ -6939,18 +6939,10 @@ void HandleUI(void)
  			}
  		}
- 		OsdWrite(m++, s, menusub == 7, 0);
+ 		OsdWrite(m++, s, menusub == 6, 0);
 -		if (is_maximig())
 -		{
 -			// the cartridge: HRTmon or the Action Replay (AR5, DeMoN v2)
@@ -51,12 +51,12 @@ index c9509cd..6556807 100644
 +		strcpy(s, " Cartridge: ");
 +		strcat(s, !(minimig_config.memory & 0x40) ? "Off" :
 +			(minimig_get_extcfg() & minimig_cart_ar_bit()) ? "Action Replay" : "HRTmon");
- 		OsdWrite(m++, s, menusub == 8, 0);
+ 		OsdWrite(m++, s, menusub == 7, 0);
  
  		OsdWrite(m++, "", 0, 0);
-@@ -7066,17 +7058,14 @@ void HandleUI(void)
+@@ -7140,17 +7132,14 @@ void HandleUI(void)
  			}
- 			else if (menusub == 8)
+ 			else if (menusub == 7)
  			{
 -				if (is_maximig())
 -				{
@@ -79,12 +79,12 @@ index c9509cd..6556807 100644
 +				else minimig_config.ext_cfg2 &= ~(arbit >> 16);
  				menustate = MENU_MINIMIG_CHIPSET1;
  			}
- 			else if (menusub == 10)
+ 			else if (menusub == 9)
 diff --git a/support/minimig/minimig_config.cpp b/support/minimig/minimig_config.cpp
-index b47b935..34ba185 100644
+index 369eb02..fcfdf24 100644
 --- a/support/minimig/minimig_config.cpp
 +++ b/support/minimig/minimig_config.cpp
-@@ -289,10 +289,15 @@ static char UploadKickstart(char *name)
+@@ -291,10 +291,15 @@ static char UploadKickstart(char *name)
  	return(0);
  }
  
@@ -101,7 +101,7 @@ index b47b935..34ba185 100644
  	{
  		// the Action Replay: AR5's DeMoN v2 build, its ROM ($A80000) and RAM
  		// ($AC0000) image, 512 KB at most; it takes no configuration
-@@ -490,9 +495,8 @@ static void ApplyConfiguration(char reloadkickstart)
+@@ -492,9 +497,8 @@ static void ApplyConfiguration(char reloadkickstart)
  	minimig_ConfigFloppy(minimig_config.floppy.drives, minimig_config.floppy.speed);
  	minimig_ConfigFloppyExt(minimig_config.externalfloppy.exDrives[0], minimig_config.externalfloppy.exDrives[1], minimig_config.externalfloppy.exDrives[2], minimig_config.externalfloppy.exDrives[3]);
  
@@ -114,7 +114,7 @@ index b47b935..34ba185 100644
  
  	if (reloadkickstart)
 diff --git a/support/minimig/minimig_config.h b/support/minimig/minimig_config.h
-index 0b41317..35fc0bb 100644
+index fa9bef9..f4bd551 100644
 --- a/support/minimig/minimig_config.h
 +++ b/support/minimig/minimig_config.h
 @@ -21,6 +21,10 @@

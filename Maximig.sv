@@ -376,8 +376,8 @@ a4k_machine machine
 	.toccata_l        (toccata_aud_left),
 	.toccata_r        (toccata_aud_right),
 	.dsnd_volume      (status[52:51]),
-	.cart_ar          (status[53]),
-	.card_bfg         (status[54]),
+	.cart_ar          (status[55]),     // Main's ext_cfg bit 23, as Minimig's (bits 19-22 are Minimig's)
+	.card_bfg         (status[56]),     // ext_cfg bit 24
 	.dsnd_l           (dsnd_l),
 	.dsnd_r           (dsnd_r),
 

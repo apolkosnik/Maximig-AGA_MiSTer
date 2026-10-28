@@ -54,14 +54,16 @@ Work in progress.
    `Maximig_<date>.rbf`, under `_Computer/` or at the top level. The name
    must start with `Maximig`.
 2. **Main:** Main_MiSTer recognises the Minimig family by core name and
-   does not know this one yet. Build Main_MiSTer with the patches in
-   [`main_patch/`](main_patch) applied in order, and install the binary as
-   `/media/fat/MiSTer`. They give the core Minimig's HPS support under the
-   name Maximig, the `games/Amiga` directory, an A4000 System menu, IDE on
-   by default, HRTmon configured for the A4000's IDE, `KICK4000.ROM` as the
-   default Kickstart (0001), the cartridge choice, HRTmon or the Action
-   Replay (0002), the CPU card, the A3640 or the BFG9060 (0003), and the same
-   cartridge choice for Minimig (0004).
+   does not know this one yet. Build Main_MiSTer (master) with the patches
+   in [`main_patch/`](main_patch) applied in order, and install the binary
+   as `/media/fat/MiSTer`. They give the core Minimig's HPS support under
+   the name Maximig, the `games/Amiga` directory, an A4000 System menu, IDE
+   on by default, HRTmon configured for the A4000's IDE, `KICK4000.ROM` as
+   the default Kickstart (0001), the cartridge choice, HRTmon or the Action
+   Replay (0002), the CPU card, the A3640 or the BFG9060 (0003), the same
+   cartridge choice for Minimig (0004), and Maximig's settings on ext_cfg
+   bits clear of Minimig's (0005: the Action Replay bit 23, the BFG9060 bit
+   24).
 3. **Kickstart:** put an **A4000** Kickstart in `games/Amiga/` as
    `KICK4000.ROM`, or pick one from the menu.
 

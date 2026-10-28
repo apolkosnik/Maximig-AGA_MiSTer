@@ -1,0 +1,121 @@
+From e539c4610b0bc18ca74874463aa5f6775e1e5a19 Mon Sep 17 00:00:00 2001
+From: Adam Polkosnik <apolkosnik@gmail.com>
+Date: Tue, 27 Oct 2026 23:00:28 -0400
+Subject: [PATCH 5/5] Maximig: ext_cfg bits clear of Minimig's (the AR at bit
+ 23, the BFG9060 at 24)
+
+Master's Minimig uses ext_cfg bits 19-22 (the drive sounds' volume, the CD
+speed); Maximig had the Action Replay at 21 and the BFG9060 at 22.  The
+Action Replay is now bit 23 (status bit 55) for both cores, as Minimig's
+already was, and the BFG9060 bit 24 (status bit 56).  A Maximig.cfg saved
+with the old bits comes back with HRTmon and the A3640.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ menu.cpp                           | 11 +++++------
+ support/minimig/minimig_config.cpp |  7 +------
+ support/minimig/minimig_config.h   | 20 +++++++-------------
+ 3 files changed, 13 insertions(+), 25 deletions(-)
+
+diff --git a/menu.cpp b/menu.cpp
+index 63c2f78..80f4fb8 100644
+--- a/menu.cpp
++++ b/menu.cpp
+@@ -6768,7 +6768,7 @@ void HandleUI(void)
+ 				fastcfg ? config_memory_fast_msg[((minimig_config.cpu & 0x23) != 0x23 && (minimig_config.cpu & 2)) ? 1 : 0][fastcfg] : "",
+ 				((minimig_config.memory >> 2) & 0x03) ? "+" : "",
+ 				((minimig_config.memory >> 2) & 0x03) ? config_memory_slow_msg[(minimig_config.memory >> 2) & 0x03] : "",
+-				(minimig_config.memory & 0x40) ? ((minimig_get_extcfg() & minimig_cart_ar_bit()) ? " AR" : " HRT") : ""
++				(minimig_config.memory & 0x40) ? ((minimig_get_extcfg() & MINIMIG_EXTCFG_AR) ? " AR" : " HRT") : ""
+ 			);
+ 
+ 			char *p = strrchr(minimig_config.kickstart, '/');
+@@ -6942,7 +6942,7 @@ void HandleUI(void)
+ 		// the cartridge: HRTmon or the Action Replay (AR5, DeMoN v2)
+ 		strcpy(s, " Cartridge: ");
+ 		strcat(s, !(minimig_config.memory & 0x40) ? "Off" :
+-			(minimig_get_extcfg() & minimig_cart_ar_bit()) ? "Action Replay" : "HRTmon");
++			(minimig_get_extcfg() & MINIMIG_EXTCFG_AR) ? "Action Replay" : "HRTmon");
+ 		OsdWrite(m++, s, menusub == 7, 0);
+ 
+ 		OsdWrite(m++, "", 0, 0);
+@@ -7134,12 +7134,11 @@ void HandleUI(void)
+ 			{
+ 				// Off -> HRTmon -> Action Replay -> Off; kept in the config and
+ 				// sent to the core at the next reset, with the cartridge's image
+-				unsigned int arbit = minimig_cart_ar_bit();
+-				int c = !(minimig_config.memory & 0x40) ? 0 : (minimig_get_extcfg() & arbit) ? 2 : 1;
++				int c = !(minimig_config.memory & 0x40) ? 0 : (minimig_get_extcfg() & MINIMIG_EXTCFG_AR) ? 2 : 1;
+ 				c = (c + (minus ? 2 : 1)) % 3;
+ 				minimig_config.memory = (minimig_config.memory & ~0x40) | (c ? 0x40 : 0);
+-				if (c == 2) minimig_config.ext_cfg2 |= arbit >> 16;
+-				else minimig_config.ext_cfg2 &= ~(arbit >> 16);
++				if (c == 2) minimig_config.ext_cfg2 |= MINIMIG_EXTCFG_AR >> 16;
++				else minimig_config.ext_cfg2 &= ~(MINIMIG_EXTCFG_AR >> 16);
+ 				menustate = MENU_MINIMIG_CHIPSET1;
+ 			}
+ 			else if (menusub == 9)
+diff --git a/support/minimig/minimig_config.cpp b/support/minimig/minimig_config.cpp
+index fcfdf24..7284644 100644
+--- a/support/minimig/minimig_config.cpp
++++ b/support/minimig/minimig_config.cpp
+@@ -291,15 +291,10 @@ static char UploadKickstart(char *name)
+ 	return(0);
+ }
+ 
+-unsigned int minimig_cart_ar_bit()
+-{
+-	return is_maximig() ? MAXIMIG_EXTCFG_AR : MINIMIG_EXTCFG_AR;
+-}
+-
+ static char UploadActionReplay()
+ {
+ 	fileTYPE file = {};
+-	if (minimig_get_extcfg() & minimig_cart_ar_bit())
++	if (minimig_get_extcfg() & MINIMIG_EXTCFG_AR)
+ 	{
+ 		// the Action Replay: AR5's DeMoN v2 build, its ROM ($A80000) and RAM
+ 		// ($AC0000) image, 512 KB at most; it takes no configuration
+diff --git a/support/minimig/minimig_config.h b/support/minimig/minimig_config.h
+index f4bd551..6ab4ba2 100644
+--- a/support/minimig/minimig_config.h
++++ b/support/minimig/minimig_config.h
+@@ -12,18 +12,15 @@
+ #define CONFIG_AGA       16
+ #define CONFIG_CDTV      32
+ 
+-// Maximig: the cartridge is the Action Replay (AR5.ROM, DeMoN v2 at
+-// $A80000), not HRTmon, when it is enabled (memory bit 6): the core's
+-// status bit 53
+-#define MAXIMIG_EXTCFG_AR 0x200000
++// the cartridge is the Action Replay (AR5.ROM, DeMoN v2 at $A80000), not
++// HRTmon, when it is enabled (memory bit 6): the core's status bit 55, for
++// Minimig and Maximig alike (bits 19-22 are Minimig's drive sounds and CD
++// speed)
++#define MINIMIG_EXTCFG_AR 0x800000
+ 
+ // Maximig: the CPU card is the BFG9060 (68040 firmware), not the A3640: the
+-// core's status bit 54, taken at the next reset
+-#define MAXIMIG_EXTCFG_BFG 0x400000
+-
+-// Minimig: the same choice of cartridge, the core's status bit 55 (bits 21
+-// and 22 are the CD speed there)
+-#define MINIMIG_EXTCFG_AR 0x800000
++// core's status bit 56, taken at the next reset
++#define MAXIMIG_EXTCFG_BFG 0x1000000
+ 
+ #define CONFIG_FLOPPY1X  0
+ #define CONFIG_FLOPPY2X  1
+@@ -107,9 +104,6 @@ const char* minimig_get_cfg_info(int num, int label);
+ 
+ void minimig_reset();
+ 
+-// the cartridge (memory bit 6) is the Action Replay, not HRTmon: the ext_cfg
+-// bit the core (Minimig or Maximig) takes it from
+-unsigned int minimig_cart_ar_bit();
+ void minimig_set_kickstart(const char *name);
+ void minimig_set_extrom(const char *name);
+ const char* minimig_get_extrom();
+-- 
+2.56.0
+
