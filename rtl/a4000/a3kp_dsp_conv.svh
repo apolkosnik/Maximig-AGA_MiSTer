@@ -14,6 +14,28 @@
 // [0] A-law input, [5:4] the rounding (x0 nearest, 01 toward -inf, 11 toward
 // 0), [6] the conditional Z write of ifalt/ifaeq/ifagt.
 
+// the float-to-integer conversion's operand and parameters (oc: linear 9
+// bits; companded the value x 2 toward 0, 18 bits; int16; int32), for the
+// A sequence (a3kp_dsp3210)
+task automatic f2i_args(input [3:0] g, input [39:0] ya, input [7:0] dc,
+                        output f2i, output dfp_t tx, output [1:0] trnd, output [5:0] tbits);
+	dfp_t x;
+	x     = unpack40(ya);
+	f2i   = (g == 4'd1) || (g == 4'd3) || (g == 4'd9);
+	tx    = x;
+	trnd  = dc[5:4];
+	tbits = 6'd32;
+	if (g == 4'd1) begin
+		if (dc[3]) tbits = 6'd9;                             // (9 bits signed: 0..255 after the clamp)
+		else begin
+			if (x.e != 8'd0) tx.e = x.e + 1'd1;
+			trnd  = 2'b11;
+			tbits = 6'd18;
+		end
+	end
+	else if (g == 4'd3) tbits = 6'd16;
+endtask
+
 // an integer scaled by 2^-sh (sh 0..1) for the normalizer: exact as a DSP
 // float (the 40-bit format holds a 32-bit integer).  normalize() takes 32
 // fraction bits: exponent 160 (128 + 32) puts the binary point at bit 0.
@@ -24,7 +46,8 @@ function automatic dsum_t int_pre(input logic signed [33:0] v, input [7:0] bias_
 	return r;
 endfunction
 
-// a float to an integer: rounding per dauc[5:4], saturated to bits
+// the float-to-integer conversion as one function: the reference the
+// simulation checks the A sequence against (a3kp_dsp3210)
 function automatic logic signed [32:0] dfp_to_int(input dfp_t x, input [1:0] rnd, input [5:0] bits);
 	logic signed [63:0] m;              // the mantissa, 31 fraction bits
 	logic signed [63:0] q, frac_mask;
@@ -55,6 +78,28 @@ function automatic logic signed [32:0] dfp_to_int(input dfp_t x, input [1:0] rnd
 	return 33'(q);
 endfunction
 
+// oc's companding, both laws: v is the value x 2 (half units), saturated to
+// 18 bits.  mu-law: 2|Y| + 33 = (33 + 2M) x 2^N; A-law: N >= 1: 2|Y| =
+// (33 + 2M) x 2^N, N = 0: 2|Y| = 2 + 4M -- one set of segment thresholds
+function automatic [7:0] oc_enc(input logic signed [32:0] v, input alaw);
+	logic [17:0] mag, t;
+	logic  [2:0] n;
+	logic  [3:0] m;
+	logic [17:0] q;
+	mag = v[32] ? 18'(-v) : 18'(v);
+	t   = alaw ? mag : mag + 18'd33;
+	n   = 3'd0;
+	for (int i = 1; i <= 7; i++) if (t >= (18'd33 << i)) n = 3'(i);
+	q   = ((t >> n) - 18'd33) >> 1;
+	m   = q[3:0];
+	if (!alaw && t >= 18'd8031 * 2 + 18'd33) begin n = 3'd7; m = 4'd15; end
+	if (alaw && mag < 18'd66) begin n = 3'd0; m = (mag >= 18'd2) ? 4'((mag - 18'd2) >> 2) : 4'd0; end
+	else if (alaw && q > 18'd15) m = 4'd15;
+	oc_enc = alaw ? ({!v[32], n, m} ^ 8'h55) : ~{v[32], n, m};
+endfunction
+
+// (the encoders as they were, the reference oc_enc is checked against in
+// simulation: a3kp_dsp3210)
 function automatic [7:0] mulaw_enc(input logic signed [32:0] v);   // v: the value x 2 (half units)
 	logic [31:0] mag;
 	logic [2:0]  n;
@@ -92,30 +137,13 @@ function automatic [7:0] alaw_enc(input logic signed [32:0] v);
 endfunction
 
 task automatic conv(input [3:0] g, input [31:0] yw, input [39:0] ya, input [7:0] dc,
+                    input logic signed [32:0] iv,     // the float-to-integer result (the A sequence's)
                     output [39:0] av, output [31:0] zd, output dflags_t fl, output fe, output nan,
                     output nq, output dsum_t nv);
-	dfp_t r, x, tx;
-	logic signed [32:0] iv;
-	logic [1:0] trnd;
-	logic [5:0] tbits;
+	dfp_t r, x;
 	av = 40'd0; zd = 32'd0; fl = '0; fe = 1'b0; nan = 1'b0; nq = 1'b0; nv = '0;
 	r = DFP_ZERO;
-	// one float-to-integer converter: oc (linear: 9 bits; companded: the
-	// value x 2 toward 0, 18 bits), int16, int32
-	x     = unpack40(ya);
-	tx    = x;
-	trnd  = dc[5:4];
-	tbits = 6'd32;
-	if (g == 4'd1) begin
-		if (dc[3]) tbits = 6'd9;                             // (9 bits signed: 0..255 after the clamp)
-		else begin
-			if (x.e != 8'd0) tx.e = x.e + 1'd1;
-			trnd  = 2'b11;
-			tbits = 6'd18;
-		end
-	end
-	else if (g == 4'd3) tbits = 6'd16;
-	iv = dfp_to_int(tx, trnd, tbits);
+	x = unpack40(ya);
 	// (ic, float16, float32: their integer to the caller's normalizer, nq)
 	case (g)
 		4'd0: begin                                          // ic: 8 bits to float
@@ -141,7 +169,7 @@ task automatic conv(input [3:0] g, input [31:0] yw, input [39:0] ya, input [7:0]
 		4'd1: begin                                          // oc: float to 8 bits
 			logic [7:0] b;
 			if (dc[3]) b = (iv < 0) ? 8'd0 : (iv > 255) ? 8'hFF : iv[7:0];
-			else       b = dc[1] ? alaw_enc(iv) : mulaw_enc(iv);   // (the value x 2)
+			else       b = oc_enc(iv, dc[1]);                   // (the value x 2)
 			av = {b, 32'd0};                             // (the accumulator's top byte)
 			zd = {24'd0, b};
 		end

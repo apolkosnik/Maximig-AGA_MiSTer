@@ -60,6 +60,7 @@ int main(int argc, char **argv)
 		top->ir1_n = !(irq1 >= 0 && ic >= irq1 && ic < irq1 + 4);
 		if (r->tb_dsp__DOT__mem[0xFFFF0 >> 2] == 0x600DD0E5u) break;
 		if (top->halted) { printf("[dsp] halted (double error) at %ld\n", t); break; }
+		if (Verilated::gotFinish()) { printf("[dsp] $finish at %ld\n", t); return 1; }   // (a failed check)
 	}
 	printf("[dsp] end after %ld clocks, %ld instructions retired, pc %08X%s\n", t, retired, top->pc,
 	       r->tb_dsp__DOT__mem[0xFFFF0 >> 2] == 0x600DD0E5u ? ", done" : "");

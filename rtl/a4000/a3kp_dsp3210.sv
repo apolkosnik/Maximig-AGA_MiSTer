@@ -375,8 +375,79 @@ function automatic logic cond_true(input [5:0] c, input [3:0] cf, input dflags_t
 	cond_true = (r == c[0]);
 endfunction
 
-// the CAU's ALU (Table 10-2's F; 4.3.2, Table 4-1's flag rules): {n,z,v,c,result}
+// the CAU's ALU (Table 10-2's F; 4.3.2, Table 4-1's flag rules): {n,z,v,c,result}.
+// One adder (a + b, b - a, a - b, the carry-reverse add on bit-reversed
+// operands; a 16-bit operation's carry and overflow from bits 16 and 15)
+// and one shifter (right; left on the reversed word)
+function automatic [31:0] rev32(input [31:0] x);
+	for (int i = 0; i < 32; i++) rev32[i] = x[31 - i];
+endfunction
+
 function automatic [35:0] alu(input [3:0] f, input [31:0] a, input [31:0] b, input l, input [3:0] cfi);
+	logic [31:0] r, x, y0, y, v, sx, sz, ra, rb, ta, tb, ts;
+	logic [63:0] sw;
+	logic n, z, ov, c, sub, rv, left, ar, c16;
+	logic [32:0] s;
+	logic  [4:0] sn;
+	n = 1'b0; z = 1'b0; ov = 1'b0; c = 1'b0; r = 32'd0;
+	// the adder
+	sub = (f == 4'd2) || (f == 4'd4) || (f == 4'd7);
+	rv  = (f == 4'd3);
+	ta  = rev32(a);
+	tb  = rev32(b);
+	ra  = l ? ta : {16'd0, ta[31:16]};
+	rb  = l ? tb : {16'd0, tb[31:16]};
+	x   = rv ? ra : (f == 4'd2) ? b : a;
+	y0  = rv ? rb : (f == 4'd2) ? a : b;
+	y   = sub ? ~y0 : y0;
+	s   = {1'b0, x} + {1'b0, y} + {32'd0, sub};
+	c16 = s[16] ^ x[16] ^ y[16];                    // the carry into bit 16
+	// the shifter
+	left = (f == 4'd1);
+	ar   = (f == 4'd13);
+	v    = l ? a : {{16{ar & a[15]}}, a[15:0]};
+	sn   = l ? b[4:0] : {1'b0, b[3:0]};
+	sx   = left ? rev32(v) : v;
+	sw   = {{32{ar & v[31]}}, sx} >> sn;
+	sz   = left ? rev32(sw[31:0]) : sw[31:0];
+	case (f)
+		4'd0, 4'd2, 4'd4, 4'd7: begin                 // a + b; b - a (2), a - b (4, 7)
+			r  = s[31:0];
+			c  = (l ? s[32] : c16) ^ sub;               // (a subtraction's borrow)
+			ov = sub ? (l ? (x[31] != y0[31] && r[31] != x[31]) : (x[15] != y0[15] && s[15] != x[15]))
+			         : (l ? (x[31] == y0[31] && r[31] != x[31]) : (x[15] == y0[15] && s[15] != x[15]));
+		end
+		4'd3: begin                                     // # carry-reverse add
+			ts = rev32(s[31:0]);
+			r  = l ? ts : {16'd0, ts[31:16]};
+			c = l ? s[32] : s[16];
+		end
+		4'd1, 4'd12, 4'd13: r = sz;
+		4'd6:  r = a & ~b;
+		4'd8:  r = a ^ b;
+		4'd10: r = a | b;
+		4'd14, 4'd15: r = a & b;
+		4'd9: begin                                   // >>>1: rotate right through carry
+			r = l ? {cfi[0], a[31:1]} : {16'd0, cfi[0], a[15:1]};
+			c = a[0];
+		end
+		4'd11: begin                                  // <<<1: rotate left through carry
+			r  = l ? {a[30:0], cfi[0]} : {16'd0, a[14:0], cfi[0]};
+			c  = l ? a[31] : a[15];
+			ov = l ? (a[31] ^ a[30]) : (a[15] ^ a[14]);
+		end
+		default: r = 32'd0;
+	endcase
+	if (!l) r[31:16] = {16{r[15]}};
+	n = l ? r[31] : r[15];
+	z = l ? (r == 32'd0) : (r[15:0] == 16'd0);
+	alu = {n, z, ov, c, r};
+endfunction
+
+// synthesis translate_off
+// (the ALU as it was, every operation its own adder or shifter: the
+// reference the shared one is checked against at start-up)
+function automatic [35:0] alu_ref(input [3:0] f, input [31:0] a, input [31:0] b, input l, input [3:0] cfi);
 	logic [31:0] r;
 	logic n, z, v, c;
 	logic [32:0] s;
@@ -437,8 +508,24 @@ function automatic [35:0] alu(input [3:0] f, input [31:0] a, input [31:0] b, inp
 	if (!l) r[31:16] = {16{r[15]}};
 	n = l ? r[31] : r[15];
 	z = l ? (r == 32'd0) : (r[15:0] == 16'd0);
-	alu = {n, z, v, c, r};
+	alu_ref = {n, z, v, c, r};
 endfunction
+initial begin
+	logic [31:0] ra_, rb_;
+	logic [3:0]  rf_, rc_;
+	logic        rl_;
+	for (int i = 0; i < 1000000; i++) begin
+		ra_ = $urandom; rb_ = $urandom; rf_ = 4'($urandom); rc_ = 4'($urandom); rl_ = 1'($urandom);
+		if (i % 4 == 1) rb_ = {27'd0, 5'($urandom)};          // (shift counts)
+		if (i % 8 == 3) ra_ = {16'($urandom), 16'h8000};
+		if (alu(rf_, ra_, rb_, rl_, rc_) !== alu_ref(rf_, ra_, rb_, rl_, rc_)) begin
+			$display("FAIL: dsp: ALU f %0d l %0d a %08X b %08X c %b: %09X, reference %09X", rf_, rl_, ra_, rb_, rc_,
+			         alu(rf_, ra_, rb_, rl_, rc_), alu_ref(rf_, ra_, rb_, rl_, rc_));
+			$finish;
+		end
+	end
+end
+// synthesis translate_on
 
 // the ALU's operands, one ALU for D's three arithmetic forms: rD = rS3 + N,
 // [if (COND)] rD = rS1 F rS2 (rS2 -n / +n: by 1, the stack pointer by 4),
@@ -777,7 +864,12 @@ always @(*) begin
 	m_prod = fmul(px, py);
 end
 
-// A: the adder (or the special function); its result, flags and Z data
+// A: the adder (or the special function); its result, flags and Z data.
+// The arithmetic shares one shifter over the cycle's first clocks (the A
+// sequence, a_q: below): S0 the adder's alignment or the float-to-integer
+// shift, S1 the normalizer or the integer's rounding and saturation; their
+// results are registered (nr_q, nf_q, iv_q) and the cycle's last state
+// waits for them.
 dfp_t     a_res;
 dflags_t  a_fl;
 logic     a_fl_en;
@@ -788,6 +880,19 @@ logic [1:0]  a_zsz;
 logic        a_zen;
 logic        a_ov;                  // over/underflow (an exception if enabled)
 logic        a_nan;
+// the sequence's inputs: what is normalized (1 the multiply-accumulate's
+// sum of a_aa and a_bb, 2 round()'s value, 3 an integer converted: a_nz),
+// the float-to-integer conversion (a_f2i: oc, int16, int32)
+logic  [1:0] a_nk;
+dadd_t       a_aa, a_bb;
+dsum_t       a_nz;
+logic        a_f2i;
+dfp_t        a_tx;
+logic  [1:0] a_trnd;
+logic  [5:0] a_tbits;
+dfp_t        nr_q;
+dflags_t     nf_q;
+logic signed [32:0] iv_q;
 always @(*) begin
 	logic [2:0] cls, mf;
 	logic [1:0] n;
@@ -804,9 +909,11 @@ always @(*) begin
 	logic [1:0] nk;                     // ... whose: 1 multiply-accumulate, 2 round, 3 a conversion
 	dfp_t       nr;
 	dflags_t    nf;
+	logic [39:0] ya;
 	s = DFP_ZERO; aa = '0; bb = '0; g = 4'd0; y = DFP_ZERO; yw = 32'd0; sw = 32'd0;
 	c = 1'b0; cv = 40'd0; cz = 32'd0; cf = '0; cfe = 1'b0; cnan = 1'b0; cnq = 1'b0;
-	nz = '0; nk = 2'd0;
+	nz = '0; nk = 2'd0; ya = 40'd0;
+	a_f2i = 1'b0; a_tx = DFP_ZERO; a_trnd = 2'd0; a_tbits = 6'd32;
 	cls = a_s.ir[31:29];
 	mf  = a_s.ir[28:26];
 	n   = a_s.ir[22:21];
@@ -829,7 +936,6 @@ always @(*) begin
 		else             s = (mf[2]) ? const_m(mf) : unpack40(acc[mf[1:0]]);            // aM, read now
 		aa = from_dfp(s, ff);
 		bb = from_prod(m_p, ss);
-		nz = fadd_pre(aa, bb);
 		nk = 2'd1;
 	end
 	else begin
@@ -863,7 +969,9 @@ always @(*) begin
 				a_fl_en = 1'b1; a_wr = 1'b1; a_wval = pack40(a_res); a_zd = pack32(a_res);
 			end
 			default: begin                               // the conversions (a3kp_dsp_conv)
-				conv(g, yw, a_s.yacc ? acc[a_s.y[1:0]] : w40(a_s.yraw), {1'b0, a_s.dc}, cv, cz, cf, cfe, cnan, cnq, nz);
+				ya = a_s.yacc ? acc[a_s.y[1:0]] : w40(a_s.yraw);
+				f2i_args(g, ya, {1'b0, a_s.dc}, a_f2i, a_tx, a_trnd, a_tbits);
+				conv(g, yw, ya, {1'b0, a_s.dc}, iv_q, cv, cz, cf, cfe, cnan, cnq, nz);
 				a_wr = 1'b1; a_wval = cv; a_zd = cz; a_fl = cf; a_fl_en = cfe; a_nan = cnan;
 				a_ov = cfe && (cf.v | cf.u);
 				if (cnq) nk = 2'd3;
@@ -872,9 +980,14 @@ always @(*) begin
 		a_zsz = z_size(a_s.ir);
 	end
 
-	// the one normalizer: the multiply-accumulate's sum, round()'s value, an
-	// integer converted (ic, float16, float32)
-	nr = normalize(nz.s, nz.e, nf);
+	// the normalizer's result (the sequence's S1): the multiply-accumulate's
+	// sum, round()'s value, an integer converted (ic, float16, float32)
+	a_nk = nk;
+	a_aa = aa;
+	a_bb = bb;
+	a_nz = nz;
+	nr = nr_q;
+	nf = nf_q;
 	case (nk)
 		2'd1: begin
 			a_res   = nr;
@@ -909,6 +1022,19 @@ always @(*) begin
 end
 
 `include "a3kp_dsp_conv.svh"
+
+// synthesis translate_off
+initial begin
+	// oc's encoder against the two it replaces, over every 18-bit value
+	for (int i = -131072; i < 131072; i++)
+		for (int a = 0; a < 2; a++)
+			if (oc_enc(33'(i), a[0]) !== (a[0] ? alaw_enc(33'(i)) : mulaw_enc(33'(i)))) begin
+				$display("FAIL: dsp: oc %0d law %0d: %02X, reference %02X", i, a, oc_enc(33'(i), a[0]),
+				         a[0] ? alaw_enc(33'(i)) : mulaw_enc(33'(i)));
+				$finish;
+			end
+end
+// synthesis translate_on
 
 //----------------------------------------------------------------------------
 // interrupts: the highest priority one pending and enabled (Table 7-1)
@@ -1319,6 +1445,78 @@ always @(*) begin
 end
 
 //----------------------------------------------------------------------------
+// the A sequence (see A): S0 (a_q 0), S1 (1), then done (2) until the cycle
+// ends -- three clocks, while a cycle has four states (the last one waits
+// for it all the same)
+//----------------------------------------------------------------------------
+// the shared shifter: arithmetic right, or (reversed) logical left, by 0..40
+function automatic logic signed [40:0] dsh(input logic signed [40:0] x, input [5:0] n, input left);
+	logic [40:0] y, z;
+	logic [81:0] w;
+	for (int i = 0; i < 41; i++) y[i] = left ? x[40 - i] : x[i];
+	w = {{41{left ? 1'b0 : x[40]}}, y} >> n;
+	z = w[40:0];
+	for (int i = 0; i < 41; i++) dsh[i] = left ? z[40 - i] : z[i];
+endfunction
+
+// the highest bit that differs from the sign (0 if none)
+function automatic [5:0] lzpos(input logic signed [40:0] v);
+	lzpos = 6'd0;
+	for (int i = 0; i < 40; i++) if (v[i] != v[40]) lzpos = 6'(i);
+endfunction
+
+// the lowest set bit (127 if none)
+function automatic [6:0] lsb33(input [32:0] v);
+	lsb33 = 7'd127;
+	for (int i = 32; i >= 0; i--) if (v[i]) lsb33 = 7'(i);
+endfunction
+
+logic  [1:0] a_q = 2'd0;
+wire         a_done = (a_q == 2'd2);
+wire         st_hold = (st == 2'd3) && !a_done;     // the cycle's last state waits for A
+logic signed [40:0] aw_q;            // S0: the sum, the value to normalize, or the integer's shifted mantissa
+logic signed [9:0]  ae_q;
+logic  [2:0] f_case;                 // the integer: 0 zero, 1 saturated, 2 aw_q, 3 aw_q rounded, 4 below one
+logic        f_neg, f_half, f_fr;
+logic signed [40:0] mac_sa, mac_sb, f_m, sh_x, sh_y;
+logic signed [9:0]  mac_d, f_sh;
+logic        mac_big, sh_l;
+logic  [6:0] f_k;
+logic  [5:0] sh_n, n_pos;
+always @(*) begin
+	mac_sa  = {a_aa.m[39], a_aa.m};
+	mac_sb  = {a_bb.m[39], a_bb.m};
+	mac_big = (a_aa.e >= a_bb.e);
+	mac_d   = mac_big ? a_aa.e - a_bb.e : a_bb.e - a_aa.e;
+	// the float to an integer: value = m x 2^(sh - 31); the shift path
+	// (sh -33..30) takes m >>> k, k = 31 - sh
+	f_m  = {{8{a_tx.m[32]}}, a_tx.m};
+	f_sh = $signed({2'b00, a_tx.e}) - 10'sd128;
+	f_k  = 7'(10'sd31 - f_sh);
+	n_pos = lzpos(aw_q);
+	if (a_q == 2'd0) begin
+		// S0: the smaller exponent's operand aligned, or m >>> (k - 1)
+		// (its low bit the rounding's first fraction bit)
+		sh_l = 1'b0;
+		if (a_nk == 2'd1) begin
+			sh_x = mac_big ? mac_sb : mac_sa;
+			sh_n = (mac_d > 10'sd40) ? 6'd40 : 6'(mac_d);
+		end
+		else begin
+			sh_x = f_m;
+			sh_n = (f_k > 7'd41) ? 6'd40 : 6'(f_k - 7'd1);
+		end
+	end
+	else begin
+		// S1: normalized, the implicit bit to bit 32
+		sh_x = aw_q;
+		sh_l = (n_pos <= 6'd32);
+		sh_n = sh_l ? 6'd32 - n_pos : n_pos - 6'd32;
+	end
+	sh_y = dsh(sh_x, sh_n, sh_l);
+end
+
+//----------------------------------------------------------------------------
 // the register file's writes, in the order of the states: port A the state's
 // DA pointer update (X, Y, Z) and, at the cycle's end, a CA load; port B the
 // D stage's result (after the load).  r0, pc, -n, +n are not registers,
@@ -1326,7 +1524,8 @@ end
 //----------------------------------------------------------------------------
 // the state ends this clock: its on-chip access, or the bus answering (a
 // state that starts an external access ends when it answers)
-wire st_done  = !reset && ce && !halted && (pend ? m_ack == m_req : !(bs_go && mtype(bs_ad, cmode) == MT_EXT));
+wire st_done  = !reset && ce && !halted && !st_hold &&
+                (pend ? m_ack == m_req : !(bs_go && mtype(bs_ad, cmode) == MT_EXT));
 wire cyc_done = st_done && st == 2'd3 && !take_err && !dbl;
 
 function automatic logic rf_wok(input [4:0] c);
@@ -1365,11 +1564,118 @@ a3kp_dsp_rf #(.NR(5)) regs
 	.rd(rq)
 );
 
+// the A sequence's registers
+wire cyc_adv = st_done && (st == 2'd3);                 // the instruction cycle ends
+// synthesis translate_off
+// (checked against the combinational reference: a3kp_dsp_pkg's fadd_pre
+// and normalize, a3kp_dsp_conv's dfp_to_int)
+always @(posedge clk)
+	if (cyc_adv && a_s.v) begin
+		dfp_t    rr;
+		dflags_t rf;
+		dsum_t   rs;
+		logic signed [32:0] ri;
+		rs = (a_nk == 2'd1) ? fadd_pre(a_aa, a_bb) : a_nz;
+		rr = normalize(rs.s, rs.e, rf);
+		if (a_nk != 2'd0 && (rr !== nr_q || rf !== nf_q)) begin
+			$display("FAIL: dsp: A sequence %08X: normalizer %09X/%02X %b, reference %09X/%02X %b",
+			         a_s.ir, nr_q.m, nr_q.e, nf_q, rr.m, rr.e, rf);
+			$finish;
+		end
+		ri = dfp_to_int(a_tx, a_trnd, a_tbits);
+		if (a_f2i && ri !== iv_q) begin
+			$display("FAIL: dsp: A sequence %08X: integer %09X, reference %09X", a_s.ir, iv_q, ri);
+			$finish;
+		end
+	end
+// synthesis translate_on
+always @(posedge clk) begin
+	if (reset || cyc_adv) a_q <= 2'd0;
+	else if (!a_done)     a_q <= a_q + 2'd1;
+
+	if (a_q == 2'd0) begin
+		// S0: the adder (normalize()'s input: aligned to the larger exponent,
+		// the smaller truncated), round()'s or a converted integer's value
+		// as they are, or the float-to-integer's shift
+		if (a_nk == 2'd1) begin
+			if (a_aa.zero)      begin aw_q <= mac_sb; ae_q <= a_bb.e; end
+			else if (a_bb.zero) begin aw_q <= mac_sa; ae_q <= a_aa.e; end
+			else begin
+				aw_q <= sh_y + (mac_big ? mac_sa : mac_sb);
+				ae_q <= mac_big ? a_aa.e : a_bb.e;
+			end
+		end
+		else if (a_nk != 2'd0) begin aw_q <= a_nz.s; ae_q <= a_nz.e; end
+		else if (f_sh >= 10'sd31) aw_q <= (f_sh == 10'sd32) ? f_m <<< 1 : f_m;
+		else aw_q <= sh_y >>> 1;                              // m >>> k: toward -inf
+		f_neg  <= a_tx.m[32];
+		f_half <= sh_y[0];
+		f_fr   <= (lsb33(a_tx.m) < f_k);                      // a fraction bit below k
+		if (a_tx.e == 8'd0)                              f_case <= 3'd0;
+		else if (f_sh > $signed({4'd0, a_tbits}))        f_case <= 3'd1;
+		else if (f_sh >= 10'sd31)                        f_case <= 3'd2;
+		else if (f_sh < -10'sd33)                        f_case <= 3'd4;
+		else                                             f_case <= 3'd3;
+	end
+
+	if (a_q == 2'd1) begin
+		logic signed [10:0] en;
+		logic signed [41:0] q, maxv, minv;
+		// S1: the normalizer -- the result's top two bits differ, then 31
+		// fraction bits (the last truncated), the exponent range checked
+		nf_q <= '{n: 1'b0, z: 1'b0, v: 1'b0, u: 1'b0};
+		en = $signed({ae_q[9], ae_q}) + $signed({5'd0, n_pos}) - 11'sd32;
+		if (aw_q == 41'sd0) begin
+			nr_q   <= DFP_ZERO;
+			nf_q.z <= 1'b1;
+		end
+		else if (en > 11'sd255) begin
+			nf_q.n <= aw_q[40];
+			nf_q.v <= 1'b1;
+			nr_q.m <= aw_q[40] ? {1'b1, 1'b0, 31'h00000000} : {1'b0, 1'b1, 31'h7FFFFFFF};
+			nr_q.e <= 8'd255;
+		end
+		else if (en < 11'sd1) begin
+			nf_q.u <= 1'b1;
+			nf_q.z <= 1'b1;
+			nr_q   <= DFP_ZERO;
+		end
+		else begin
+			nf_q.n <= aw_q[40];
+			nr_q.m <= sh_y[33:1];
+			nr_q.e <= en[7:0];
+		end
+		// the integer: rounded per a_trnd (01 toward -inf, 11 toward 0, else
+		// nearest: the first fraction bit), saturated to a_tbits
+		case (a_tbits)
+			6'd9:    maxv = 42'sd255;
+			6'd16:   maxv = 42'sd32767;
+			6'd18:   maxv = 42'sd131071;
+			default: maxv = 42'sd2147483647;
+		endcase
+		minv = -maxv - 42'sd1;
+		case (f_case)
+			3'd0:    q = 42'sd0;
+			3'd1:    q = f_neg ? minv : maxv;
+			3'd2:    q = {aw_q[40], aw_q};
+			3'd4:    q = f_neg ? -42'sd1 : 42'sd0;
+			default: case (a_trnd)
+				2'b01:   q = {aw_q[40], aw_q};
+				2'b11:   q = {aw_q[40], aw_q} + ((f_neg && f_fr) ? 42'sd1 : 42'sd0);
+				default: q = {aw_q[40], aw_q} + (f_half ? 42'sd1 : 42'sd0);
+			endcase
+		endcase
+		if (q > maxv) q = maxv;
+		if (q < minv) q = minv;
+		iv_q <= 33'(q);
+	end
+end
+
 // the on-chip RAM: its own block (byte-enable M10K inference)
 wire [10:0] ram_a  = {bs_ad[12], bs_ad[11:2]};
 wire  [3:0] ram_be = be_of(bs_sz, bs_ad[1:0]);
 wire [31:0] ram_wd = lanes(bs_sz, bs_wd);
-wire        ram_en = !reset && ce && !halted && !pend && bs_go && mtype(bs_ad, cmode) == MT_RAM;
+wire        ram_en = !reset && ce && !halted && !st_hold && !pend && bs_go && mtype(bs_ad, cmode) == MT_RAM;
 wire        ram_we = ram_en && bs_we;
 always @(posedge clk) begin
 	if (ram_we) begin
@@ -1454,7 +1760,7 @@ always @(posedge clk) begin
 		inj_pc   <= 32'd0;
 		fpc      <= 32'd0;
 	end
-	else if (ce && !halted) begin
+	else if (ce && !halted && !st_hold) begin
 		if (pend) begin
 			// an external access: done when the bus answers
 			if (m_ack == m_req) begin

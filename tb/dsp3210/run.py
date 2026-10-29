@@ -29,10 +29,14 @@ for t in tests:
     bad = [(a, v, got.get(a)) for a, v in exp if got.get(a) != v]
     halt = re.search(r'//!\s*halt\b', src) is not None
     done = ('halted (double error)' in r.stdout) if halt else (', done' in r.stdout)
+    if 'FAIL' in r.stdout or r.returncode != 0:
+        done = False                    # a check inside the core failed ($finish)
     if bad or not done:
         fail += 1
         print(f'{t}: FAIL' + ('' if done else ' (no halt)' if halt else ' (no done mark)'))
-        print('   ' + r.stdout.strip().split('\n')[0])
+        for l in r.stdout.split('\n'):
+            if l.startswith('FAIL') or l.startswith('[dsp] end') or l.startswith('[dsp] halted'):
+                print('   ' + l)
         for a, v, g in bad:
             print(f'   {a:08X}: {g if g is None else f"{g:08X}"} want {v:08X}')
     else:
