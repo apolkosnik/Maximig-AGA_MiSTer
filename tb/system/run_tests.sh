@@ -80,7 +80,7 @@ done
 # the AA3000+ (a4k_machine with A3000P and the BFG9060 alone, as Maximig.sv
 # builds it on this branch): the DMAC+, the DSP control latch, the chip RAM
 # and ROM windows
-OBJ=${OBJ}_a3kp ./build.sh -GA3000P=1 -GCPU_CARD=1 > build_tests_a3kp.log 2>&1 || { tail -30 build_tests_a3kp.log; exit 1; }
+OBJ=${OBJ}_a3kp ./build.sh -GA3000P=1 -GCPU_CARD=1 -GDRIVE_SOUNDS=0 > build_tests_a3kp.log 2>&1 || { tail -30 build_tests_a3kp.log; exit 1; }
 ../asm/build.sh t_a3kp > /dev/null
 out=$(timeout 1800 ./${OBJ}_a3kp/Vtb_top --rom ../asm/build/t_a3kp.rom --ms 150 --quiet 2>&1) || true
 if echo "$out" | grep -q '^\[mailbox\].*result 600D'; then echo "t_a3kp PASS"; else echo "$out" | grep -v '^\[sim\]'; echo "t_a3kp FAIL"; fail=1; fi

@@ -20,7 +20,9 @@ module a4k_machine
 	parameter bit A3000P   = 1'b0,
 	// the AA3000+'s DSP3210 (a3kp_dsp3210); without it the U124 latch and
 	// the status still answer, the DSP's lines idle (BIO6/BIO7 pulled up)
-	parameter bit DSP3210  = 1'b1
+	parameter bit DSP3210  = 1'b1,
+	// Main's floppy drive sounds (drive_sounds)
+	parameter bit DRIVE_SOUNDS = 1'b1
 )
 (
 	// clocks: one PLL, edge aligned
@@ -1278,6 +1280,7 @@ a4k_ddr3 ddr3
 	.DDRAM_WE        (DDRAM_WE)
 );
 
+generate if (DRIVE_SOUNDS) begin : g_dsnd
 drive_sounds drive_sounds
 (
 	.clk(clk_114),
@@ -1292,6 +1295,11 @@ drive_sounds drive_sounds
 	.ddr_dout(DDRAM_DOUT),
 	.ddr_dout_ready(dsnd_ready)
 );
+end else begin : g_no_dsnd
+	assign {dsnd_l, dsnd_r} = 32'd0;
+	assign dsnd_addr = 29'd0;
+	assign dsnd_rd   = 1'b0;
+end endgenerate
 
 //////////////////////////////  the chipset  ////////////////////////////////
 
