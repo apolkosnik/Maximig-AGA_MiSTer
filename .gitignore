@@ -45,3 +45,6 @@ tb/agnus/*.log
 tb/rtg/obj/
 tb/dsp3210/obj/
 tb/**/__pycache__/
+menu/build/
+menu/tests/build/
+menu/*.mnu
