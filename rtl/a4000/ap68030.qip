@@ -1,0 +1,14 @@
+# AP68030 (the rtl/AP68030 submodule): its Quartus file list (syn/ap68030.qsf's
+# order).  rtl/core/*.vh are `included, not compiled, hence the search paths.
+set A [file join $::quartus(qip_path) ".." "AP68030" "rtl"]
+set_global_assignment -name SEARCH_PATH $A
+set_global_assignment -name SEARCH_PATH [file join $A "core"]
+set_global_assignment -name VERILOG_FILE [file join $A "ap030_top.v"]
+set_global_assignment -name VERILOG_FILE [file join $A "ap030_core.v"]
+set_global_assignment -name VERILOG_FILE [file join $A "ap030_memsys.v"]
+set_global_assignment -name VERILOG_FILE [file join $A "ap030_mmu.v"]
+set_global_assignment -name VERILOG_FILE [file join $A "ap030_cache.v"]
+set_global_assignment -name VERILOG_FILE [file join $A "ap030_bus.v"]
+set_global_assignment -name VERILOG_FILE [file join $A "ap030_alu.v"]
+set_global_assignment -name VERILOG_FILE [file join $A "ap030_muldiv.v"]
+set_global_assignment -name VERILOG_FILE [file join $A "ap030_regfile.v"]

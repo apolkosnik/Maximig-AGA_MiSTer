@@ -214,7 +214,7 @@ a4k_machine #(.CPU_CARD(CPU_CARD), .A3000P(A3000P), .DSP3210(DSP3210), .DRIVE_SO
 assign dbg_xgo  = machine.dbg_xgo;
 assign dbg_xvec = machine.dbg_xvec;
 assign dbg_xpc  = machine.dbg_xpc;
-assign dbg_xsr  = machine.cpu.be.x_osr;
+assign dbg_xsr  = machine.dbg_xsr;
 
 sdram_model sdram
 (

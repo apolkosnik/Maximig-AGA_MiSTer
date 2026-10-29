@@ -2,3 +2,6 @@
 	path = rtl/AP68040
 	url = https://github.com/apolkosnik/AP68040.git
 	branch = faster
+[submodule "rtl/AP68030"]
+	path = rtl/AP68030
+	url = https://github.com/apolkosnik/AP68030.git

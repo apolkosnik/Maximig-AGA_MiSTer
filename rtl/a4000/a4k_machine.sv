@@ -13,7 +13,8 @@
 module a4k_machine
 #(
 	// the CPU card, chosen at build time (only it is built): 0 the A3640,
-	// 1 the BFG9060, 2 both, the OSD's card_bfg choosing at a reset
+	// 1 the BFG9060, 2 both, the OSD's card_bfg choosing at a reset; 3 no
+	// card: the AA3000's own 68030 on the motherboard (AP68030, a4k_ap030)
 	parameter int CPU_CARD = 2,
 	// the machine: 0 the A4000, 1 the AA3000+ (docs/AA3000.md): the DMAC+
 	// with the DSP3210's control latch, its chip RAM and ROM windows
@@ -245,7 +246,7 @@ always @(posedge clk_57) if (cpu_ce) cpu_rsti_n <= sys_rst_n;
 reg [1:0] card_bfg_s = 2'b00;
 always @(posedge clk_57) begin
 	card_bfg_s <= {card_bfg_s[0], card_bfg};
-	if (CPU_CARD == 0)      bfg <= 1'b0;
+	if (CPU_CARD == 0 || CPU_CARD == 3) bfg <= 1'b0;
 	else if (CPU_CARD == 1) bfg <= 1'b1;
 	else if (!cpu_rsti_n)   bfg <= card_bfg_s[1];
 end
@@ -265,6 +266,22 @@ localparam CPU_DEBUG = 1'b1;
 localparam CPU_DEBUG = 1'b0;
 `endif
 
+// the CPU's debug outputs (the recorder below, the benches)
+wire        dbg_xgo, dbg_hfgo;
+wire  [7:0] dbg_xvec, dbg_hff;
+wire [31:0] dbg_xpc, dbg_hfld, dbg_hfa, dbg_hfpc, dbg_evpc;
+wire  [2:0] dbg_ev;
+wire [15:0] dbg_rinfo;
+
+// the 68030 (CPU_CARD 3): its bus, its beats (a4k_ap030)
+wire        m3_lb_req, m3_lb_we, m3_iack7_t;
+wire [31:2] m3_lb_addr;
+wire  [3:0] m3_lb_be;
+wire [31:0] m3_lb_wdata;
+wire  [2:0] m3_lb_tm;
+wire [15:0] dbg_xsr;            // (the benches: the SR an exception stacks)
+
+generate if (CPU_CARD != 3) begin : g_cpu040
 ap68040 #(.DEBUG(CPU_DEBUG)) cpu
 (
 	.clk(clk_cpu),
@@ -287,6 +304,67 @@ ap68040 #(.DEBUG(CPU_DEBUG)) cpu
 	.dbg_ev(dbg_ev), .dbg_evpc(dbg_evpc),
 	.dbg_halted(dbg_halted)
 );
+`ifdef VERILATOR
+assign dbg_xsr = cpu.be.x_osr;
+`else
+assign dbg_xsr = 16'd0;
+`endif
+assign {m3_lb_req, m3_lb_we, m3_iack7_t, m3_lb_addr, m3_lb_be, m3_lb_wdata, m3_lb_tm} = '0;
+end
+else begin : g_cpu030
+// The AA3000's own processor: a 68030 on clk_sys, both its edges (28 MHz;
+// the A3000's is 25 MHz), the motherboard's slave on its rising ones
+// (a4k_ap030).  No 68882; the data cache is not snooped (an MC68030's
+// is not: the OS clears it around DMA).
+wire [31:0] p_a, p_do, p_di;
+wire  [2:0] p_fc;
+wire  [1:0] p_siz, p_dsack;
+wire        p_rw, p_as_n, p_ds_n, p_berr_n, p_avec_n, p_ciin_n, p_rsto, p_inst;
+wire [15:0] p_sr;
+reg   [1:0] p_rst = 2'b00;
+always @(posedge clk_sys) p_rst <= {p_rst[0], sys_rst_n};
+// the interrupt level through Gary's master (a4k_lbus, clk_57), registered
+// on clk_sys: the core samples IPL on its falling edges, which clk_57's
+// rising ones coincide with
+reg   [2:0] p_ipl = 3'b111;
+always @(posedge clk_sys) p_ipl <= gary_ien ? cpu_ipl_n : 3'b111;
+
+ap030_top #(.FAST_PORT(0), .USE_CE(0)) cpu
+(
+	.clk(clk_sys), .ce(1'b1),
+	.a(p_a), .fc(p_fc), .siz(p_siz), .rw(p_rw), .rmc_n(), .as_n(p_as_n), .ds_n(p_ds_n),
+	.dben_n(), .ecs_n(), .ocs_n(), .ciout_n(), .cbreq_n(), .bus_oe(),
+	.d_o(p_do), .d_oe(), .d_i(p_di),
+	.dsack0_n(p_dsack[0]), .dsack1_n(p_dsack[1]), .sterm_n(1'b1), .berr_n(p_berr_n), .halt_n(1'b1),
+	.avec_n(p_avec_n), .ciin_n(p_ciin_n), .cback_n(1'b1), .br_n(1'b1), .bg_n(), .bgack_n(1'b1),
+	.ipl_n(p_ipl), .ipend_n(),
+	.reset_n_i(p_rst[1]), .reset_n_oe(p_rsto),
+	.cdis_n(1'b1), .mmudis_n(1'b1), .refill_n(), .status_n(),
+	.fast_req(), .fast_addr(), .fast_fc(), .fast_rw(), .fast_ci(), .fast_burst(), .fast_be(), .fast_wdata(),
+	.fast_match(1'b0), .fast_ready(1'b0), .fast_valid(1'b0), .fast_last(1'b0), .fast_word(2'd0), .fast_rdata(32'd0),
+	.dbg_pc(dbg_pc), .dbg_sr(p_sr), .dbg_state(), .dbg_inst(p_inst),
+	.tm_pop(), .tm_md(), .tm_q(), .tm_qn(), .tm_scan(), .tm_flush(),
+	.fetch_stop_v(1'b0), .fetch_stop(32'd0), .fetch_scan_v(1'b0), .fetch_scan_to(32'd0),
+	.dbg_halted(dbg_halted), .dbg_vbr(), .dbg_cacr(), .dbg_cache_clear(),
+	.snoop_we(1'b0), .snoop_addr(32'd0), .nmi_vec_nocache(1'b0), .fetch_lazy(1'b0)
+);
+assign cpu_rsto_n = !p_rsto;
+assign dbg_retire = p_inst;
+assign dbg_xsr    = p_sr;
+assign {dbg_rinfo, dbg_xgo, dbg_xvec, dbg_xpc, dbg_hfgo, dbg_hfld, dbg_hfa, dbg_hff, dbg_hfpc, dbg_ev, dbg_evpc} = '0;
+assign {c_a, c_do, c_rw_n, c_siz, c_tt, c_tm, c_ts_n} = '0;
+
+a4k_ap030 bus030
+(
+	.clk(clk_sys),
+	.reset(!p_rst[1]),
+	.a(p_a), .fc(p_fc), .siz(p_siz), .rw(p_rw), .as_n(p_as_n), .ds_n(p_ds_n), .d_cpu(p_do),
+	.d_mem(p_di), .dsack_n(p_dsack), .berr_n(p_berr_n), .avec_n(p_avec_n), .ciin_n(p_ciin_n),
+	.iack7_t(m3_iack7_t),
+	.lb_req(m3_lb_req), .lb_ack(lb_ack), .lb_addr(m3_lb_addr), .lb_be(m3_lb_be), .lb_we(m3_lb_we),
+	.lb_wdata(m3_lb_wdata), .lb_tm(m3_lb_tm), .lb_rdata(lb_rdata), .lb_berr(lb_berr), .lb_ci(lb_ci)
+);
+end endgenerate
 
 wire        lb_req, lb_ack, lb_we, lb_line, lb_berr, lb_ci, lb_local;
 // a4k_lbus's beat port: the card's beats, or (AA3000+) the bus masters' through a3kp_lbarb
@@ -320,7 +398,7 @@ wire [31:0] a_lb_wdata, b_lb_wdata;
 wire  [1:0] a_lb_beat, b_lb_beat, a_lb_tt, b_lb_tt;
 wire  [2:0] a_lb_tm, b_lb_tm;
 
-generate if (CPU_CARD != 1) begin : g_a3640
+generate if (CPU_CARD == 0 || CPU_CARD == 2) begin : g_a3640
 a4k_a3640 a3640
 (
 	.clk(clk_57),
@@ -373,7 +451,7 @@ end else begin : g_no_a3640
 	assign {a_lb_beat, a_lb_tt, a_lb_tm} = 7'd0;
 end endgenerate
 
-generate if (CPU_CARD != 0) begin : g_bfg9060
+generate if (CPU_CARD == 1 || CPU_CARD == 2) begin : g_bfg9060
 a4k_bfg9060 bfg9060
 (
 	.clk(clk_57),
@@ -434,16 +512,18 @@ assign c_tea_n  = bfg ? b_tea_n  : a_tea_n;
 assign c_tci_n  = bfg ? b_tci_n  : a_tci_n;
 assign c_tbi_n  = bfg ? b_tbi_n  : a_tbi_n;
 assign c_avec_n = bfg ? b_avec_n : a_avec_n;
-assign iack7_t  = a_iack7_t ^ b_iack7_t;
-assign lb_req   = bfg ? b_lb_req   : a_lb_req;
-assign lb_addr  = bfg ? b_lb_addr  : a_lb_addr;
-assign lb_be    = bfg ? b_lb_be    : a_lb_be;
-assign lb_we    = bfg ? b_lb_we    : a_lb_we;
-assign lb_wdata = bfg ? b_lb_wdata : a_lb_wdata;
-assign lb_line  = bfg ? b_lb_line  : a_lb_line;
-assign lb_beat  = bfg ? b_lb_beat  : a_lb_beat;
-assign lb_tt    = bfg ? b_lb_tt    : a_lb_tt;
-assign lb_tm    = bfg ? b_lb_tm    : a_lb_tm;
+assign iack7_t  = a_iack7_t ^ b_iack7_t ^ m3_iack7_t;
+// (the 68030's beats: single long words, TT 0, TM its function code)
+localparam bit P030 = (CPU_CARD == 3);
+assign lb_req   = P030 ? m3_lb_req   : bfg ? b_lb_req   : a_lb_req;
+assign lb_addr  = P030 ? m3_lb_addr  : bfg ? b_lb_addr  : a_lb_addr;
+assign lb_be    = P030 ? m3_lb_be    : bfg ? b_lb_be    : a_lb_be;
+assign lb_we    = P030 ? m3_lb_we    : bfg ? b_lb_we    : a_lb_we;
+assign lb_wdata = P030 ? m3_lb_wdata : bfg ? b_lb_wdata : a_lb_wdata;
+assign lb_line  = P030 ? 1'b0        : bfg ? b_lb_line  : a_lb_line;
+assign lb_beat  = P030 ? 2'd0        : bfg ? b_lb_beat  : a_lb_beat;
+assign lb_tt    = P030 ? 2'd0        : bfg ? b_lb_tt    : a_lb_tt;
+assign lb_tm    = P030 ? m3_lb_tm    : bfg ? b_lb_tm    : a_lb_tm;
 
 // a beat terminating on the local bus, for the simulation's bus trace
 reg bus_ack_d;
@@ -511,16 +591,10 @@ wire        extrom_on;           // the chipset: an extension ROM is loaded
 // (MAXIMIG_RTR_ILLEGAL: an illegal instruction's exception freezes it too,
 // for a program that dies with 8000 0004; cputest ends every test with
 // ILLEGAL).  The last exception's vector and stacked PC go with it.
-wire        dbg_xgo;
-wire  [7:0] dbg_xvec;
-wire [31:0] dbg_xpc;
 reg   [7:0] rtr_xvec = 8'd0;
 reg  [31:0] rtr_xpc = 32'd0;
 // ... and the last exception routine's handler fetch (its load data, the
 // A operand's register value, {A source, the DMU job's answer}, its PC)
-wire        dbg_hfgo;
-wire [31:0] dbg_hfld, dbg_hfa, dbg_hfpc;
-wire  [7:0] dbg_hff;
 reg  [31:0] rtr_hfld = 32'd0, rtr_hfa = 32'd0, rtr_hfpc = 32'd0;
 reg   [7:0] rtr_hff = 8'd0;
 `ifdef MAXIMIG_RTR_ILLEGAL
@@ -532,11 +606,8 @@ wire [31:0] rtr_rd;
 wire  [9:0] rtr_ra;
 // the front end's last 32 events (redirects, the BTB's, exception entry,
 // the handler fetch), with the ring's next slot at each
-wire  [2:0] dbg_ev;
-wire [31:0] dbg_evpc;
 // the retired uop: dbg_retire is registered at the commit, so its PC is
 // the previous clock's dbg_pc; dbg_rinfo comes with it
-wire [15:0] dbg_rinfo;
 reg  [31:0] dbg_pc_d = 32'd0;
 reg   [7:0] rtr_wp = 8'd0;
 reg         rtr_frz = 1'b0;
