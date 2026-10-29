@@ -68,6 +68,8 @@
 #include <string>
 #include <vector>
 #include <sys/stat.h>
+#include <ucontext.h>
+#include "../../hps/maximig_scsi_target.h"
 
 static Vtb_top *top;
 static uint64_t halfstep = 0;       // half periods of clk_114
@@ -216,12 +218,112 @@ static void ide_load_sector(int ch, Hdf &h, uint32_t lba, bool last, uint8_t drv
 	mgmt_wr(ch, 5, (last ? 0x5E00 : 0x5C00) | drv);
 }
 
+//----------------------------------------------------------------------------
+// Main's SCSI service for the AA3000+ (a3kp_scsi_hps on IDE channel 0,
+// request codes 1-3): Main's own command code, hps/maximig_scsi_target.h,
+// run as a coroutine beside the machine -- each register access and each
+// wait for a request yields to the main loop, which goes on ticking (and
+// watching the mailbox) and resumes it after so many clk_sys cycles or once
+// the core requests
+//----------------------------------------------------------------------------
+static ucontext_t co_main, co_scsi;
+static std::vector<char> co_stack(1 << 20);
+static bool     co_active = false;       // a command is being served
+static bool     co_wait_req = false;     // ... waiting for the core's request
+static uint64_t co_until = 0;            // ... else sleeping until this clk_sys cycle
+static uint64_t sys_cycles = 0;          // the main loop's clk_sys cycles
+static scsi_target co_t;
+
+static void co_sleep(int n)
+{
+	co_until = sys_cycles + n;
+	swapcontext(&co_scsi, &co_main);
+}
+static void co_mgmt_wr(int a, uint16_t d)
+{
+	top->ide_mgmt_addr = a; top->ide_mgmt_wdata = d; top->ide_mgmt_wr = 1;
+	co_sleep(1);
+	top->ide_mgmt_wr = 0;
+	co_sleep(1);
+}
+static uint16_t co_mgmt_rd(int a)
+{
+	top->ide_mgmt_addr = a;
+	co_sleep(2);
+	uint16_t v = top->ide_mgmt_rdata;
+	top->ide_mgmt_rd = 1;
+	co_sleep(1);
+	top->ide_mgmt_rd = 0;
+	co_sleep(1);
+	return v;
+}
+static void sio_wr(void *, int reg, uint16_t v) { co_mgmt_wr(reg, v); }
+static void sio_rdregs(void *, uint16_t *v, int n) { for (int i = 0; i < n; i++) v[i] = co_mgmt_rd(i); }
+static void sio_wrbuf(void *, const uint16_t *w, int n) { for (int i = 0; i < n; i++) co_mgmt_wr(15, w[i]); }
+static void sio_rdbuf(void *, uint16_t *w, int n) { for (int i = 0; i < n; i++) w[i] = co_mgmt_rd(15); }
+static int sio_wait(void *)
+{
+	co_wait_req = true;
+	swapcontext(&co_scsi, &co_main);
+	co_wait_req = false;
+	return top->ide_req & 7;
+}
+static int sdisk_read(void *ctx, uint32_t lba, uint8_t *b, uint32_t cnt)
+{
+	Hdf &h = *(Hdf *)ctx;
+	if (ide_trace) printf("[scsi] %.4f ms read %u count %u\n", sim_ms(), lba, cnt);
+	fseek(h.f, (long)lba * 512, SEEK_SET);
+	return fread(b, 512, cnt, h.f) == cnt;
+}
+static int sdisk_write(void *ctx, uint32_t lba, const uint8_t *b, uint32_t cnt)
+{
+	Hdf &h = *(Hdf *)ctx;
+	if (ide_trace) printf("[scsi] %.4f ms write %u count %u\n", sim_ms(), lba, cnt);
+	fseek(h.f, (long)lba * 512, SEEK_SET);
+	int ok = fwrite(b, 512, cnt, h.f) == cnt;
+	fflush(h.f);
+	return ok;
+}
+static void co_entry()
+{
+	scsi_io io = { nullptr, sio_wr, sio_rdregs, sio_wrbuf, sio_rdbuf, sio_wait };
+	scsi_disk d[2];
+	for (int i = 0; i < 2; i++) {
+		Hdf &h = hdf[i];
+		d[i] = { &h, h.f != nullptr, h.sectors, h.cyl, h.heads, h.spt, sdisk_read, sdisk_write };
+	}
+	if (ide_trace) printf("[scsi] %.4f ms command\n", sim_ms());
+	scsi_command(&co_t, &io, d);
+	co_active = false;
+	swapcontext(&co_scsi, &co_main);
+}
+
+// each clk_sys cycle of the main loop: start or resume the service
+static void scsi_service()
+{
+	sys_cycles++;
+	uint8_t r = top->ide_req & 7;
+	if (!co_active) {
+		if (r != SCSI_RQ_CMD) return;
+		getcontext(&co_scsi);
+		co_scsi.uc_stack.ss_sp = co_stack.data();
+		co_scsi.uc_stack.ss_size = co_stack.size();
+		co_scsi.uc_link = nullptr;
+		makecontext(&co_scsi, co_entry, 0);
+		co_active = true;
+		co_wait_req = false;
+		swapcontext(&co_main, &co_scsi);
+	}
+	else if (co_wait_req ? (r >= SCSI_RQ_CMD && r <= SCSI_RQ_DIN) : (sys_cycles >= co_until))
+		swapcontext(&co_main, &co_scsi);
+}
+
 static void ide_service()
 {
 	uint8_t req = top->ide_req;
 	for (int ch = 0; ch < 2; ch++) {
 		uint8_t r = (req >> (ch * 3)) & 7;
-		if (r == 0) continue;
+		if (r == 0 || (r >= SCSI_RQ_CMD && r <= SCSI_RQ_DIN)) continue;   // (the SCSI service's)
 		IdeCmd &c = ide_cmd[ch];
 		if (r == 6) {
 			// a reset: ready
@@ -724,7 +826,8 @@ int main(int argc, char **argv)
 		}
 		uint64_t ph = (halfstep - 1) % 8;
 		if (ph == 0) { video.sample(); uart.sample(); }
-		if (ph == 0 && top->ide_req) ide_service();
+		if (ph == 0) scsi_service();
+		if (ph == 0 && top->ide_req && !co_active) ide_service();
 		if (ph % 4 == 0) {
 			// a clk_57 rising edge; the CPU's registers moved at it if cpu_ce
 			// was set before it (the CPU's outputs then hold a new cycle)

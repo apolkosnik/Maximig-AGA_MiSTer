@@ -8,7 +8,7 @@
 //  auxiliary status, the command and the data registers.
 //
 //  The initiator role on a bus with targets that never select or reselect
-//  it (a3kp_scsi_disk; nothing on the AA3000+'s bus initiates):
+//  it (a3kp_scsi_hps; nothing on the AA3000+'s bus initiates):
 //  * Level I: Reset (00), Abort (01), Assert ATN (02), Negate ACK (03),
 //    Disconnect (04), Set IDI (0F).
 //  * Simple Level II: Select-With-ATN (06), Select-Without-ATN (07),
@@ -55,7 +55,7 @@ module a3kp_sbic
 	output reg  [7:0] d_rdata,
 	output reg        d_more,         // with the ack: drq stays up for another byte
 
-	// the SCSI bus (a3kp_scsi_disk)
+	// the SCSI bus (a3kp_scsi_hps)
 	output reg        sel = 1'b0,
 	output reg  [2:0] sel_id,
 	output reg        atn = 1'b0,

@@ -714,15 +714,15 @@ a4k_lbus #(.A3000P(A3000P)) lbus
 );
 
 // the AA3000+'s DMAC+ and the DSP3210's control latch (U124), the WD33C93A
-// and the SCSI disks (ide0, Main's drives 0 and 1, as SCSI IDs 0 and 1), the
-// bus masters' arbiter
+// and the SCSI disks (Main's drives 0 and 1, as SCSI IDs 0 and 1, through
+// Main's IDE channel 0: a3kp_scsi_hps), the bus masters' arbiter
 wire [15:0] ide0_mgmt_rd;
 wire [31:0] ide0_io_rdata;
 wire        ide0_irq, ide0_nodata, ide0_drq;
 wire  [1:0] ide0_present;
-wire  [3:0] scsi_io_addr;
-wire        scsi_io_rd, scsi_io_wr;
-wire [15:0] scsi_io_wdata;
+wire [15:0] scsi_mgmt_rd;
+wire  [2:0] scsi_req;
+wire        scsi_busy;
 generate if (A3000P) begin : g_dmac
 	wire       sbic_req, sbic_ack, sbic_a0, sbic_we, sbic_intrq, sbic_drq, sbic_mr;
 	wire [7:0] sbic_wdata, sbic_rdata;
@@ -869,7 +869,7 @@ generate if (A3000P) begin : g_dmac
 	reg t_abort_d = 1'b0;
 	always @(posedge clk_sys) t_abort_d <= t_abort;
 
-	a3kp_scsi_disk disks
+	a3kp_scsi_hps disks
 	(
 		.clk(clk_sys),
 		.reset(~sys_rst_n | (t_abort != t_abort_d)),
@@ -882,14 +882,15 @@ generate if (A3000P) begin : g_dmac
 		.tdata(t_tdata),
 		.ack(t_ack),
 		.idata(t_idata),
-		.io_address(scsi_io_addr),
-		.io_read(scsi_io_rd),
-		.io_write(scsi_io_wr),
-		.io_writedata(scsi_io_wdata),
-		.io_readdata(ide0_io_rdata[15:0]),
-		.io_nodata(ide0_nodata),
-		.present(ide0_present)
+		.mgmt_address(ide_mgmt_addr[3:0]),
+		.mgmt_write(ide_mgmt_wr & ~ide_mgmt_addr[4]),
+		.mgmt_writedata(ide_mgmt_wdata),
+		.mgmt_read(ide_mgmt_rd & ~ide_mgmt_addr[4]),
+		.mgmt_readdata(scsi_mgmt_rd),
+		.request(scsi_req),
+		.present()
 	);
+	assign scsi_busy = t_bsy;
 
 	a3kp_lbarb arb
 	(
@@ -939,7 +940,9 @@ end else begin : g_no_dmac
 	assign dm_rdata = 32'd0;
 	assign dmac_int2 = 1'b0;
 	assign dmac_int6 = 1'b0;
-	assign {scsi_io_addr, scsi_io_rd, scsi_io_wr, scsi_io_wdata} = 22'd0;
+	assign scsi_mgmt_rd = 16'h0000;
+	assign scsi_req     = 3'd0;
+	assign scsi_busy    = 1'b0;
 	assign bus_req   = lb_req;
 	assign lb_ack    = bus_ack;
 	assign bus_addr  = lb_addr;
@@ -1051,23 +1054,25 @@ a4k_rtc rtc_chip
 );
 
 // the A4000 IDE port: one channel, master and slave, served by the HPS
-// (ide0, Main's drives 0 and 1).  On the AA3000+ ide0 is the SCSI disks'.
+// (ide0, Main's drives 0 and 1).  The AA3000+ has none: Main's channel 0
+// serves its SCSI disks (a3kp_scsi_hps, above).
 
+generate if (!A3000P) begin : g_ide0
 ide ide0
 (
 	.clk(clk_sys),
-	.rst_n(sys_rst_n & (A3000P | cpu_rsto_sys_n)),
+	.rst_n(sys_rst_n & cpu_rsto_sys_n),
 	.irq(ide0_irq),
 	.drq(ide0_drq),
 	.use_fast(1'b1),
 	.no_data(ide0_nodata),
 	.drive_en(ide0_present),
 
-	.io_address(A3000P ? scsi_io_addr : ide_io_addr),
-	.io_read(A3000P ? scsi_io_rd : ide_io_rd),
+	.io_address(ide_io_addr),
+	.io_read(ide_io_rd),
 	.io_readdata(ide0_io_rdata),
-	.io_write(A3000P ? scsi_io_wr : ide_io_wr),
-	.io_writedata({16'd0, A3000P ? scsi_io_wdata : ide_io_wdata}),
+	.io_write(ide_io_wr),
+	.io_writedata({16'd0, ide_io_wdata}),
 	.io_32(1'b0),
 	.io_wait(),
 
@@ -1079,6 +1084,13 @@ ide ide0
 	.mgmt_read(ide_mgmt_rd & ~ide_mgmt_addr[4]),
 	.mgmt_readdata(ide0_mgmt_rd)
 );
+end else begin : g_no_ide0
+	assign ide0_mgmt_rd = 16'h0000;
+	assign ide0_io_rdata = 32'hFFFFFFFF;
+	assign {ide0_irq, ide0_nodata, ide0_drq} = 3'b000;
+	assign ide0_present = 2'b00;
+	assign ide_req[2:0] = scsi_req;
+end endgenerate
 
 // the port Budgie drives: ide0; the AA3000+ has none (an A3000: $DD2000
 // is nothing there, a4k_lbus; Budgie is built without it)
@@ -1086,8 +1098,8 @@ assign ide_io_rdata   = A3000P ? 32'hFFFFFFFF : ide0_io_rdata;
 assign ide_irq        = A3000P ? 1'b0         : ide0_irq;
 assign ide_nodata     = A3000P ? 1'b0         : ide0_nodata;
 assign ide_present    = A3000P ? 2'b00        : ide0_present;
-assign ide_led        = ide0_drq;
-assign ide_mgmt_rdata = ide_mgmt_addr[4] ? 16'h0000 : ide0_mgmt_rd;
+assign ide_led        = A3000P ? scsi_busy : ide0_drq;
+assign ide_mgmt_rdata = ide_mgmt_addr[4] ? 16'h0000 : A3000P ? scsi_mgmt_rd : ide0_mgmt_rd;
 assign ide_req[5:3]   = 3'b000;
 
 ////////////////////////////  A2065 ETHERNET  ///////////////////////////////
